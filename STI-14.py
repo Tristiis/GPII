@@ -1,4 +1,5 @@
 import numba
+import uncertainties
 import os.path
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,6 +9,7 @@ from os import makedirs
 from scipy import signal
 from numpy import random
 from scipy.signal import find_peaks
+from scipy.io.wavfile import write
 
 #from Praktikumsmodul import *
 
@@ -34,12 +36,12 @@ beta_k = [0.085, 0.078, 0.065, 0.011, 0.047, 0.095]
 path = r"C:\Programmieren\Praktikum\GPII\Data"
 
 config = {
-    "duration": 10, # duration of the genererated signal in s
-    "dead_time": 1,
-    "srate": 9600, # sample rate in Hz
-    "cal_amp": 1,
-    "cal_freq": 300.0,
-    "n_samples": len(k_vals) * len(mod_vals), # add additional samples if more than STI-14 is performed
+    "duration"  :   10, # duration of the genererated signal in s
+    "dead_time" :   1,
+    "srate"     :   44100, # sample rate in Hz -> this needs to be higher (44100) in order to capture the 8kHz band
+    "cal_amp"   :   1,
+    "cal_freq"  :   300.0,
+    "n_samples" :   len(k_vals) * len(mod_vals) # add additional samples if more than STI-14 is performed
 }
 
 config["time"] = np.arange(0, config["duration"], 1 / config["srate"])
@@ -65,11 +67,11 @@ def signal_generation(config:dict):
 
         pnts = len(time)
 
-        frex = np.linspace(low_f, high_f, 500)
+        frex = np.geomspace(low_f, high_f, 500)
         noise = np.zeros(pnts, dtype = np.float64)
 
         for i in numba.prange(len(frex)):
-            amp = 1/(frex[i]**1)
+            amp = 1/(frex[i]**0.5)
             phase = random.random() * 2 * np.pi
             noise += amp * np.sin(2 * np.pi * frex[i] * time + phase)
         noise = noise - np.mean(noise)
@@ -121,11 +123,17 @@ def signal_slicing(sign:np.ndarray, config:dict):
 
     sign = sign[peaks[0]:]
 
+    plt.plot(sign)
+
     sliced_signals = []
     for i in range(config["n_samples"]):
         low_index = silence + peak_width + silence * i + sample_size * i
         high_index = silence + peak_width + silence * i + sample_size * (i+1)
+        plt.axvline(low_index)
+        plt.axvline(high_index)
         sliced_signals.append(sign[low_index : high_index]) 
+
+    plt.show()
 
     arr = np.empty(shape = (len(k_vals), len(mod_vals)), dtype=np.ndarray)
     counter = 0
@@ -138,13 +146,20 @@ def signal_slicing(sign:np.ndarray, config:dict):
 # ---------- STI Computation ----------
 
 def sti_comp(signs, config:dict):
-    def envelope_detection(sign:np.ndarray, srate:int):
+    sos_low = signal.butter(20, 100, 'low', fs = config["srate"], output = "sos")
+
+    def envelope_detection(sign:np.ndarray):
         arr = np.empty(shape = (len(k_vals), len(mod_vals)), dtype=np.ndarray)
         for i_k in range(len(k_vals)):
+            low_f:float = k_vals[i_k]["f_c"] / np.sqrt(2)
+            high_f:float = np.sqrt(2) * k_vals[i_k]["f_c"]
+            sos_band = signal.butter(20, (low_f, high_f), "band", fs = config["srate"], analog = False, output = "sos")
             for j_f_m in range(len(mod_vals)):
-                sign[i_k, j_f_m] *= sign[i_k, j_f_m]
-                sos = signal.butter(20, 100, 'low', fs = srate, output = "sos")
-                y = signal.sosfilt(sos, sign[i_k, j_f_m])
+                arr[i_k, j_f_m] = signal.sosfilt(sos_band, sign[i_k, j_f_m])
+                arr[i_k, j_f_m] *= arr[i_k, j_f_m]
+                y = signal.sosfilt(sos_low, arr[i_k, j_f_m])
+                fig, axs = plt.subplots()
+                axs.plot(y)
                 arr[i_k, j_f_m] = y
         return arr
 
@@ -195,7 +210,7 @@ def sti_comp(signs, config:dict):
 
     for sign, i in zip(signs, range(len(signs))):
         params["sign"].append(signal_slicing(sign, config))
-        params["I_k_m"].append(envelope_detection(params["sign"][i], config["srate"]))
+        params["I_k_m"].append(envelope_detection(params["sign"][i]))
         params["mod_dep"].append(modulation_depths(params["I_k_m"][i], config["time"]))
 
     m_k_fm = params["mod_dep"][1] / params["mod_dep"][0]
@@ -233,15 +248,16 @@ def main():
     #newpath = r'C:\Program Files\arbitrary' 
     #if not os.path.exists(newpath):
     #    os.makedirs(newpath)
-
+    """
     # check wether or not the path to the raw measurement data exists
     for i in range(100):
         newpath = path + rf"\Messung_{i}" 
         if not os.path.exists(newpath):
             makedirs(newpath)
-            pd.DataFrame({"input": sign, "ref": signs[0], "mes": signs[1]}).to_csv(newpath + r"\Messdaten.csv", sep = ";")
+            #write(filename = newpath + r"\Mes_Data.wav", rate = config["srate"], data = np.array([sign, signs[0], signs[1]]))
+            pd.DataFrame({"input": sign, "ref": signs[0], "mes": signs[1]}).to_csv(newpath + r"\Messdaten.csv", sep = ";", index = False)
             break
-
+    """
     sti, ti = sti_comp(signs, config)
     plt.imshow(ti)
     plt.show()
