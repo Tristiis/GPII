@@ -1,13 +1,15 @@
+import json
 import numba
+import pyaudio
 import uncertainties
 import os.path
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
+import matplotlib.pyplot as plt
+import acoustics.generator as generator
 from tqdm import tqdm
 from os import makedirs
 from scipy import signal
-from numpy import random
 from scipy.signal import find_peaks
 from scipy.io.wavfile import write
 
@@ -33,19 +35,8 @@ beta_k = [0.085, 0.078, 0.065, 0.011, 0.047, 0.095]
 
 # ---------- System Variables ----------
 
-path = r"C:\Programmieren\Praktikum\GPII\Data"
-
-config = {
-    "duration"  :   10, # duration of the genererated signal in s
-    "dead_time" :   1,
-    "srate"     :   44100, # sample rate in Hz -> this needs to be higher (44100) in order to capture the 8kHz band
-    "cal_amp"   :   1,
-    "cal_freq"  :   300.0,
-    "n_samples" :   len(k_vals) * len(mod_vals) # add additional samples if more than STI-14 is performed
-}
-
-config["time"] = np.arange(0, config["duration"], 1 / config["srate"])
-
+with open('STI-14_config.json', 'r') as file:
+    config = json.load(file)
 
 # ---------- Signal Generation ----------
 
@@ -54,30 +45,7 @@ def signal_generation(config:dict):
     start of signal is silence, calibration, silence
     """
     @numba.njit(fastmath = True, parallel = True)
-    def pink_noise_v2(f_c:float, time:np.ndarray):
-        """
-        f_c:float -> center frequency of the octave band
-        time:np.ndarray -> 1d time array
-        
-        credit: Mike X Cohen, implemented from: https://www.youtube.com/watch?v=oKFSvwAbDhU&t=5s
-        """
-
-        low_f:float = f_c / np.sqrt(2)
-        high_f:float = np.sqrt(2) * f_c 
-
-        pnts = len(time)
-
-        frex = np.geomspace(low_f, high_f, 500)
-        noise = np.zeros(pnts, dtype = np.float64)
-
-        for i in numba.prange(len(frex)):
-            amp = 1/(frex[i]**0.5)
-            phase = random.random() * 2 * np.pi
-            noise += amp * np.sin(2 * np.pi * frex[i] * time + phase)
-        noise = noise - np.mean(noise)
-        noise = noise / np.max(np.abs(noise))
-        return noise
-
+    
     def am_modulation(sign:np.ndarray, f_m:float, time:np.ndarray):
         """
         sign:np.ndarray -> 1d signal array
@@ -91,25 +59,40 @@ def signal_generation(config:dict):
     def G_k(sign:np.ndarray, k:int):
         return sign * 10**(k_vals[k]["L_k"] / 20)
 
-    silence = np.array([0 for i in range(config["dead_time"] * config["srate"])])
-    calibration = np.array([config["cal_amp"] * np.sin(2 * np.pi * config["cal_freq"] * t/config["srate"]) for t in range(int(config["srate"]//config["cal_freq"]))])
+    time = np.arange(0, config["sample_time"], 1 / config["srate"])
 
-    full_signal = silence.copy()
-    full_signal = np.concatenate((full_signal, calibration), axis = 0)
-    full_signal = np.concatenate((full_signal, silence), axis = 0)
+    silence = config["dead_time"] * config["srate"]
+    sample_time_size = config["sample_time"] * config["srate"]
+    peak_width = int(config["srate"]/config["cal_freq"])
+
+    calibration = np.array([config["cal_amp"] * np.sin(2 * np.pi * config["cal_freq"] * t/config["srate"]) for t in range(peak_width)])
+
+    length_of_signal = 98 * sample_time_size + 100 * silence + peak_width
+
+    full_signal = np.zeros(length_of_signal)
+    full_signal[silence : silence + peak_width] = calibration
+
+    i = 0
 
     for k in tqdm(k_vals):
+        low_f:float = k_vals[k]["f_c"] / np.sqrt(2)
+        high_f:float = np.sqrt(2) * k_vals[k]["f_c"]
+        sos_band = signal.butter(20, (low_f, high_f), "band", fs = config["srate"], analog = False, output = "sos")
         for m in tqdm(mod_vals):
-            noise = pink_noise_v2(k_vals[k]["f_c"], config["time"])
-            sign = am_modulation(noise, m, config["time"])
+            noise = generator.pink(config["srate"] * config["sample_time"])
+            noise = signal.sosfilt(sos_band, noise)
+            sign = am_modulation(noise, m, time) # type: ignore
             sign = G_k(sign, k)
-            full_signal = np.concatenate((full_signal, sign), axis = 0)
-            full_signal = np.concatenate((full_signal, silence), axis = 0)
+            
+            low_index = 2 * silence + peak_width + silence * i + sample_time_size * i
+            high_index = 2 * silence + peak_width + silence * i + sample_time_size * (i+1)
+            full_signal[low_index:high_index] = sign
+            i += 1
     return full_signal
 
 # ---------- Measurement Pipeline ----------
 
-def measurement(sign:np.ndarray): # needs to be implemented
+def measurement(sign): # needs to be implemented
     return [sign, sign] # first ref then mes signal
 
 # ---------- Intermediary preparation of the measurement data ----------
@@ -118,19 +101,49 @@ def signal_slicing(sign:np.ndarray, config:dict):
     peaks, props = find_peaks(sign)
 
     silence = config["dead_time"] * config["srate"]
-    sample_size = config["duration"] * config["srate"]
-    peak_width = int(3/4 * config["srate"]/config["cal_freq"] + 23)
+    sample_time_size = config["sample_time"] * config["srate"]
+    peak_width = int(3/4 * config["srate"]/config["cal_freq"])
+    anti_transient = int(config["srate"] * config["a_transient"])
 
-    sign = sign[peaks[0]:]
+    plt.plot(sign, rasterized = True)
+    plt.axvline(peaks[0])
 
-    plt.plot(sign)
+    print("Please check if the calibration peak was correctly identified in the following plot.")
+    plt.show()
+
+    logical = input("Was the Calibration Peak found correctly? (y/n) ")
+    if logical in ["n", "N"]:
+        print("Please name the index of the calibration peak.")
+        plt.plot(sign, rasterized = True)
+        plt.show()
+        peak_index = input("Peak Index: ")
+        
+        def test_for_int(peak_index):
+            try:
+                int(peak_index)
+            except ValueError:
+                return False
+            else:
+                return True
+
+        while test_for_int(peak_index) == False:
+            print("Please only input integers.")
+            peak_index = input("Peak Index: ")
+
+        sign = sign[int(peak_index):]
+    else:
+        sign = sign[peaks[0]:]
+
+    fig_slic, axs_slic = plt.subplots()
+
+    axs_slic.plot(sign, rasterized = True)
 
     sliced_signals = []
-    for i in range(config["n_samples"]):
-        low_index = silence + peak_width + silence * i + sample_size * i
-        high_index = silence + peak_width + silence * i + sample_size * (i+1)
-        plt.axvline(low_index)
-        plt.axvline(high_index)
+    for i in range(len(k_vals) * len(mod_vals)):
+        low_index = silence + peak_width + anti_transient + silence * i + sample_time_size * i
+        high_index = silence + peak_width + silence * i + sample_time_size * (i+1)
+        axs_slic.axvline(low_index)
+        axs_slic.axvline(high_index)
         sliced_signals.append(sign[low_index : high_index]) 
 
     plt.show()
@@ -145,7 +158,7 @@ def signal_slicing(sign:np.ndarray, config:dict):
 
 # ---------- STI Computation ----------
 
-def sti_comp(signs, config:dict):
+def sti_comp(signs, config:dict, newpath:str):
     sos_low = signal.butter(20, 100, 'low', fs = config["srate"], output = "sos")
 
     def envelope_detection(sign:np.ndarray):
@@ -158,8 +171,6 @@ def sti_comp(signs, config:dict):
                 arr[i_k, j_f_m] = signal.sosfilt(sos_band, sign[i_k, j_f_m])
                 arr[i_k, j_f_m] *= arr[i_k, j_f_m]
                 y = signal.sosfilt(sos_low, arr[i_k, j_f_m])
-                fig, axs = plt.subplots()
-                axs.plot(y)
                 arr[i_k, j_f_m] = y
         return arr
 
@@ -175,15 +186,18 @@ def sti_comp(signs, config:dict):
     
     def limit_mod_ratio(m):
         return min([m, 1])
+    
+    def auditory_effects(m):
+        pass
 
     def snr_comp(m):
         if m == 1:
             return 15
         snr = 10 * np.log10(m / (1 - m))
         match snr:
-            case tmp if snr < -15:
+            case _ if snr < -15:
                 return -15
-            case tmp if snr > 15:
+            case _ if snr > 15:
                 return 15
             case _:
                 return snr
@@ -208,10 +222,12 @@ def sti_comp(signs, config:dict):
         "mod_dep": []
     }
 
+    time = np.arange(0, config["sample_time"] - config["a_transient"], 1 / config["srate"])
+
     for sign, i in zip(signs, range(len(signs))):
         params["sign"].append(signal_slicing(sign, config))
         params["I_k_m"].append(envelope_detection(params["sign"][i]))
-        params["mod_dep"].append(modulation_depths(params["I_k_m"][i], config["time"]))
+        params["mod_dep"].append(modulation_depths(params["I_k_m"][i], time))
 
     m_k_fm = params["mod_dep"][1] / params["mod_dep"][0]
 
@@ -229,7 +245,27 @@ def sti_comp(signs, config:dict):
     mti = modulation_transfer_index(ti)
 
     sti = sti_last_step(mti)
-    print(sti)
+    print(f"STI Value: {sti}")
+
+    k = [k_vals[i]["f_c"] for i in k_vals]
+    k = [f"{i/1000}k" if i >= 1000 else i for i in k]
+
+    fig_ti, axs_ti = plt.subplots()
+
+    im = axs_ti.imshow(ti)
+
+    axs_ti.set_title("Transfer Index TI")
+    axs_ti.set_xticks(range(len(mod_vals)), labels=mod_vals,rotation=45, ha="right", rotation_mode="anchor")
+    axs_ti.set_yticks(range(len(k_vals)), labels=k)
+    axs_ti.set_xlabel("Modulation Frequencies [Hz]")
+    axs_ti.set_ylabel("Center frequency [Hz]")
+
+    fig_ti.colorbar(im, ax=axs_ti, orientation='horizontal', fraction=.1)
+    fig_ti.tight_layout()
+    
+    fig_ti.savefig(fname = newpath + r"TI_plot.pdf", format = "pdf")
+
+    plt.show()
 
     return sti, ti
 
@@ -238,29 +274,35 @@ def sti_comp(signs, config:dict):
 def main():
     sign = signal_generation(config)
 
+    path = r"\Data"
+
+    newpath = path + rf"\Messung_{0}"
+    counter = 1
+
+    logical = input("Proceed with saving all signals? (y/n) ")
+    # check wether or not the path to the raw measurement data exists
+    if logical in ["y", "Y"]:
+        # Source - https://stackoverflow.com/questions/1274405/how-to-create-new-folder
+        # Posted by mcandre, modified by community. See post 'Timeline' for change history
+        # Retrieved 2025-12-15, License - CC BY-SA 3.0
+        while os.path.exists(newpath):
+            newpath = path + rf"\Messung_{counter}"
+            counter += 1
+        makedirs(newpath)
+
+        write(filename = newpath + r"\Input.wav", rate = config["srate"], data = sign)
+
     signs = measurement(sign)
 
     # ---------- Saving the Data in a csv file ----------
+    
+    sti, ti = sti_comp(signs, config, newpath)
 
-    # Source - https://stackoverflow.com/questions/1274405/how-to-create-new-folder
-    # Posted by mcandre, modified by community. See post 'Timeline' for change history
-    # Retrieved 2025-12-15, License - CC BY-SA 3.0
-    #newpath = r'C:\Program Files\arbitrary' 
-    #if not os.path.exists(newpath):
-    #    os.makedirs(newpath)
-    """
+    logical = input("Proceed with saving all signals? (y/n) ")
     # check wether or not the path to the raw measurement data exists
-    for i in range(100):
-        newpath = path + rf"\Messung_{i}" 
-        if not os.path.exists(newpath):
-            makedirs(newpath)
-            #write(filename = newpath + r"\Mes_Data.wav", rate = config["srate"], data = np.array([sign, signs[0], signs[1]]))
-            pd.DataFrame({"input": sign, "ref": signs[0], "mes": signs[1]}).to_csv(newpath + r"\Messdaten.csv", sep = ";", index = False)
-            break
-    """
-    sti, ti = sti_comp(signs, config)
-    plt.imshow(ti)
-    plt.show()
-
+    if logical in ["y", "Y"]:
+        print("Saving data...")
+        pd.DataFrame({"ref": signs[0], "mes": signs[1]}).to_csv(newpath + r"\Messdaten.csv", sep = ";", index = False)
+        
 if __name__ == "__main__":
     main()

@@ -1,0 +1,8 @@
+{
+    "sample_time": 10,
+    "dead_time": 1,
+    "srate": 44100,
+    "cal_amp": 1,
+    "cal_freq": 300.0,
+    "a_transient": 0.2
+}
