@@ -1,6 +1,6 @@
 import json
-import numba
 import pyaudio
+import threading
 import uncertainties
 import os.path
 import numpy as np
@@ -13,7 +13,7 @@ from scipy import signal
 from scipy.signal import find_peaks
 from scipy.io.wavfile import write
 
-#from Praktikumsmodul import *
+from Praktikumsmodul import *
 
 # ---------- Variables prescribed by the standard ----------
 
@@ -40,12 +40,11 @@ with open('STI-14_config.json', 'r') as file:
 
 # ---------- Signal Generation ----------
 
-def signal_generation(config:dict):
+def signal_generation():
     """
     start of signal is silence, calibration, silence
     """
-    @numba.njit(fastmath = True, parallel = True)
-    
+
     def am_modulation(sign:np.ndarray, f_m:float, time:np.ndarray):
         """
         sign:np.ndarray -> 1d signal array
@@ -88,16 +87,41 @@ def signal_generation(config:dict):
             high_index = 2 * silence + peak_width + silence * i + sample_time_size * (i+1)
             full_signal[low_index:high_index] = sign
             i += 1
+
+    full_signal = full_signal - np.mean(full_signal)
+    full_signal = full_signal / np.max(np.abs(full_signal))
     return full_signal
 
 # ---------- Measurement Pipeline ----------
 
-def measurement(sign): # needs to be implemented
+def measurement(sign:np.ndarray, newpath:str): # needs to be implemented
+    def write(stop_sign):
+        with open(newpath + r"\Input.wav", mode = "r") as output_file:
+            p_out = pyaudio.PyAudio()
+            stream_out = p_out.open(format = pyaudio.paInt24,
+                    channels = 1,
+                    rate = config["srate"],
+                    output = True)
+            
+            while not stream_out.is_active():
+                time.sleep(1)
+
+            stream_out.write(sign)
+            
+
+    def read_ref():
+        pass
+    
+    def read_mes():
+        pass
+
+    write_end = threading.Event()
+
     return [sign, sign] # first ref then mes signal
 
 # ---------- Intermediary preparation of the measurement data ----------
 
-def signal_slicing(sign:np.ndarray, config:dict):
+def signal_slicing(sign:np.ndarray):
     peaks, props = find_peaks(sign)
 
     silence = config["dead_time"] * config["srate"]
@@ -158,7 +182,7 @@ def signal_slicing(sign:np.ndarray, config:dict):
 
 # ---------- STI Computation ----------
 
-def sti_comp(signs, config:dict, newpath:str):
+def sti_comp(signs, newpath:str):
     sos_low = signal.butter(20, 100, 'low', fs = config["srate"], output = "sos")
 
     def envelope_detection(sign:np.ndarray):
@@ -225,7 +249,7 @@ def sti_comp(signs, config:dict, newpath:str):
     time = np.arange(0, config["sample_time"] - config["a_transient"], 1 / config["srate"])
 
     for sign, i in zip(signs, range(len(signs))):
-        params["sign"].append(signal_slicing(sign, config))
+        params["sign"].append(signal_slicing(sign))
         params["I_k_m"].append(envelope_detection(params["sign"][i]))
         params["mod_dep"].append(modulation_depths(params["I_k_m"][i], time))
 
@@ -272,9 +296,9 @@ def sti_comp(signs, config:dict, newpath:str):
 # ---------- Main ----------
 
 def main():
-    sign = signal_generation(config)
+    sign = signal_generation()
 
-    path = r"\Data"
+    path = r"C:\Programmieren\Praktikum\GPII\Data"
 
     newpath = path + rf"\Messung_{0}"
     counter = 1
@@ -290,13 +314,23 @@ def main():
             counter += 1
         makedirs(newpath)
 
-        write(filename = newpath + r"\Input.wav", rate = config["srate"], data = sign)
+        match config["bitrate"]:
+            case 16:
+                bitrate = np.int16
+            case 32:
+                bitrate = np.int32
+            case _:
+                raise ValueError
 
-    signs = measurement(sign)
+        print(max(sign), min(sign))
+        sign = sign * 2**(config["bitrate"]-1)
+        write(filename = newpath + r"\Input.wav", rate = config["srate"], data = sign.astype(bitrate))
+
+    signs = measurement(sign, newpath)
 
     # ---------- Saving the Data in a csv file ----------
     
-    sti, ti = sti_comp(signs, config, newpath)
+    sti, ti = sti_comp(signs, newpath)
 
     logical = input("Proceed with saving all signals? (y/n) ")
     # check wether or not the path to the raw measurement data exists
