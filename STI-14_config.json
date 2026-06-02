@@ -5,5 +5,6 @@
     "cal_amp"       : 1,
     "cal_freq"      : 300.0,
     "a_transient"   : 0.2,
-    "bitrate"      : 16
+    "bitrate"       : 16,
+    "N"             : 100
 }
