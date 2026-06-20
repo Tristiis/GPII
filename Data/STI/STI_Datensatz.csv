@@ -1,0 +1,13 @@
+;Material;Durchmesser;u_Durchmesser;[Durchmesser];Abstand;u_Abstand;[Abstand];Frequenz;u_Frequenz;[Frequenz];Bemerkungen;STI;calibration_intervention;peak_index_ref;peeak_index_mes
+0;Nylon;0.5;0.002405;mm;3.036;0.000289;m;0;50;Hz;;0.006071428571428571;;;
+1;Nylon;0.5;0.002405;mm;3.036;0.000289;m;0;50;Hz;;0.6211329642463815;1.0;;
+2;Nylon;0.5;0.002405;mm;1.956;0.000289;m;0;50;Hz;;0.5520286345817635;1.0;;
+3;Nylon;0.5;0.002405;mm;1.055;0.000289;m;755;50;Hz;Leichter Knick im Faden;0.5768173837773746;1.0;;
+4;Nylon;0.5;0.002405;mm;4.35;0.000289;m;513;50;Hz;;0.5323424327374742;1.0;;
+5;Nylon;0.5;0.002405;mm;3.182;0.000289;m;589;50;Hz;"Papier an Messseite leicht angerissen; BÃ¼roklammer ist leicht erkennbar";0.48832035728067985;1.0;;
+6;Nylon;0.5;0.002405;mm;3.182;0.000289;m;265;50;Hz;Dropouts zwischen 15:30/15:40;0.5725769944318996;1.0;;
+7;Nylon;0.5;0.002405;mm;3.182;0.000289;m;281;50;Hz;Lautsprecher EQ vergessen;0.4583802542534203;1.0;;
+8;Nylon;0.99;0.002405;mm;3.99;0.000289;m;253;50;Hz;;0.7161270002783315;1.0;;
+9;Nylon;0.99;0.002405;mm;2.997;0.000289;m;320;50;Hz;Membran an Speakerseite VulkanfÃ¶rmig;0.4506155754662664;1.0;;
+10;Nylon;0.99;0.002405;mm;1.968;0.000289;m;387;50;Hz;Membran fast zerissen (Saurons Ampel);0.574595985042839;1.0;;
+11;Nylon;0.35;0.002405;mm;2.109;0.000289;m;508;50;Hz;;0.5316362203128404;1.0;;

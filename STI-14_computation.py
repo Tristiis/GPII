@@ -1,6 +1,5 @@
+import os
 import json
-import numba
-import os.path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -35,22 +34,35 @@ beta_k = [0.085, 0.078, 0.065, 0.011, 0.047, 0.095]
 with open('STI-14_config.json', 'r') as file:
     config = json.load(file)
 
-calibration_overwrite = True
-test_phase = True
+calibration_overwrite = False
+test_phase = False
+ref_signal = True
 
 # ---------- Intermediary preparation of the measurement data ----------
 
-def signal_slicing(sign:np.ndarray):
-    peaks, props = find_peaks(sign)
-
+def signal_slicing(sign:np.ndarray, calibration_intervention: bool, peak_index = None):
     silence = config["dead_time"] * config["srate"]
     sample_time_size = config["sample_time"] * config["srate"]
-    peak_width = int(3/4 * config["srate"]/config["cal_freq"])
+    peak_width = int(config["srate"]/(2 * config["cal_amp_freq"]))
     anti_transient = int(config["srate"] * config["a_transient"])
 
-    if calibration_overwrite == False:
-        plt.plot(sign, rasterized = True)
-        plt.axvline(peaks[0])
+    mean = np.int32(np.mean(sign))
+    sign -= mean
+
+    calibration = np.array([config["cal_amp"] * np.sin(2 * np.pi * config["cal_amp_freq"] * t/config["srate"]) * np.sin(2 * np.pi * config["cal_freq"] * t/config["srate"]) for t in range(peak_width)])
+
+    corr = signal.correlate(sign[:len(sign)//16], calibration)
+    lags = signal.correlation_lags(len(sign[:len(sign)//16]), len(calibration))
+
+    peaks, props = signal.find_peaks(corr/max(corr), prominence = 1)
+
+    lag = lags[peaks[np.where(props["prominences"] == max(props["prominences"]))]][0] + peak_width//2
+
+    if calibration_overwrite == True and peak_index != None:
+        sign = sign[peak_index:]
+    elif calibration_overwrite == False and peak_index == None:
+        plt.plot(sign[:config["srate"]*60], rasterized = True)
+        plt.axvline(lag)
 
         print("Please check if the calibration peak was correctly identified in the following plot.")
         plt.show()
@@ -58,7 +70,7 @@ def signal_slicing(sign:np.ndarray):
         logical = input("Was the Calibration Peak found correctly? (y/n) ")
         if logical in ["n", "N"]:
             print("Please name the index of the calibration peak.")
-            plt.plot(sign, rasterized = True)
+            plt.plot(sign[:config["srate"]*60], rasterized = True)
             plt.show()
             peak_index = input("Peak Index: ")
             
@@ -73,59 +85,53 @@ def signal_slicing(sign:np.ndarray):
             while test_for_int(peak_index) == False:
                 print("Please only input integers.")
                 peak_index = input("Peak Index: ")
-
             sign = sign[int(peak_index):]
         else:
-            sign = sign[peaks[0]:]
+            sign = sign[lag:]
+            calibration_intervention = False
+    elif peak_index != None:
+        sign = sign[int(peak_index):]
     else:
-        sign = sign[peaks[0]:]
-
-    if calibration_overwrite == False:
-        fig_slic, axs_slic = plt.subplots()
-        axs_slic.plot(sign, rasterized = True)
-
+        sign = sign[lag:]
+        calibration_intervention = False
 
     sliced_signals = []
     for i in range(len(k_vals) * len(mod_vals)):
-        low_index = silence + peak_width + anti_transient + silence * i + sample_time_size * i
-        high_index = silence + peak_width + silence * i + sample_time_size * (i+1)
-        if calibration_overwrite == False:
-            axs_slic.axvline(low_index) # type: ignore
-            axs_slic.axvline(high_index) # type: ignore
+        low_index = silence + peak_width//2 + anti_transient + silence * i + sample_time_size * i
+        high_index = silence + peak_width//2 + silence * i + sample_time_size * (i+1)
         sliced_signals.append(sign[low_index : high_index]) 
-    
-    if calibration_overwrite == False:
-        plt.show()
-
     arr = np.empty(shape = (len(k_vals), len(mod_vals)), dtype=np.ndarray)
     counter = 0
     for k in range(len(k_vals)):
         for f_m in range(len(mod_vals)):
             arr[k, f_m] = sliced_signals[counter]
             counter += 1
-    return arr
+    if calibration_intervention == True:
+        return arr, peak_index # type: ignore
+    return arr, None
 
 # ---------- STI Computation ----------
 
 def sti_comp(sliced_signs, newpath:str):
     sos_low = signal.butter(20, 100, 'low', fs = config["srate"], output = "sos")
+    anti_transient = int(config["srate"] * config["a_transient"])
 
     def envelope_detection(sign:np.ndarray):
         arr = np.empty(shape = (len(k_vals), len(mod_vals)), dtype=np.ndarray)
-        for i_k in range(len(k_vals)):
+        for i_k in tqdm(range(len(k_vals))):
             low_f:float = k_vals[i_k]["f_c"] / np.sqrt(2)
             high_f:float = np.sqrt(2) * k_vals[i_k]["f_c"]
             sos_band = signal.butter(20, (low_f, high_f), "band", fs = config["srate"], analog = False, output = "sos")
             for j_f_m in range(len(mod_vals)):
-                arr[i_k, j_f_m] = signal.sosfilt(sos_band, sign[i_k, j_f_m])
+                arr[i_k, j_f_m] = signal.sosfiltfilt(sos_band, sign[i_k, j_f_m])
                 arr[i_k, j_f_m] *= arr[i_k, j_f_m]
-                y = signal.sosfilt(sos_low, arr[i_k, j_f_m])
-                arr[i_k, j_f_m] = y
+                y = signal.sosfiltfilt(sos_low, arr[i_k, j_f_m])
+                arr[i_k, j_f_m] = y[anti_transient:]
         return arr
 
     def modulation_depths(I:np.ndarray, time:np.ndarray):
         arr = np.empty(shape = (len(k_vals), len(mod_vals)), dtype=np.ndarray)
-        for i_k in range(len(k_vals)):
+        for i_k in tqdm(range(len(k_vals))):
             for j_f_m in range(len(mod_vals)):
                 sin_sum = (np.sum(I[i_k, j_f_m] * np.sin(2 * np.pi * mod_vals[j_f_m] * time)))**2
                 cos_sum = (np.sum(I[i_k, j_f_m] * np.cos(2 * np.pi * mod_vals[j_f_m] * time)))**2
@@ -171,13 +177,18 @@ def sti_comp(sliced_signs, newpath:str):
         "mod_dep": []
     }
 
-    time = np.arange(0, config["sample_time"] - config["a_transient"], 1 / config["srate"])
+    time = np.arange(0, config["sample_time"] - 2 * config["a_transient"], 1 / config["srate"])
 
-    for i in range(2):
-        params["I_k_m"].append(envelope_detection(params["sign"][i]))
-        params["mod_dep"].append(modulation_depths(params["I_k_m"][i], time))
+    if ref_signal == True:
+        for i in range(2):
+            params["I_k_m"].append(envelope_detection(params["sign"][i]))
+            params["mod_dep"].append(modulation_depths(params["I_k_m"][i], time))
 
-    m_k_fm = params["mod_dep"][1] / params["mod_dep"][0]
+        m_k_fm = params["mod_dep"][0] / params["mod_dep"][1]
+    else:
+        params["I_k_m"].append(envelope_detection(params["sign"][0]))
+        params["mod_dep"].append(modulation_depths(params["I_k_m"][0], time))
+        m_k_fm = params["mod_dep"][0] / 1
 
     limit_mod_ratio_vec = np.vectorize(limit_mod_ratio)
     m_k_fm = limit_mod_ratio_vec(m_k_fm)
@@ -216,34 +227,50 @@ def plt_sav_results(sti, ti, newpath):
     fig_ti.colorbar(im, ax=axs_ti, orientation='horizontal', fraction=.1)
     fig_ti.tight_layout()
     
-    if test_phase == False:
+    if test_phase == False: #  and not os.path.exists(newpath + r"\TI_plot.pdf")
         fig_ti.savefig(fname = newpath + r"\TI_plot.pdf", format = "pdf")
+        df = pd.DataFrame(ti, index = k)
+        df.to_csv(newpath + r"\TI_Daten.csv", sep = ";", header = mod_vals)
 
     print(f"STI Value: {sti}")
-    plt.show()
+    #plt.show()
 
-def main():
-    path = r"C:\Programmieren\Praktikum\GPII\Data"
+def main(num):
+    global calibration_overwrite
+    newpath = path + rf"\Messung_{num}"
 
-    newpath = path + rf"\Messung_{0}"
-    counter = 1
+    calibration_intervention = True
 
-    # Source - https://stackoverflow.com/questions/1274405/how-to-create-new-folder
-    # Posted by mcandre, modified by community. See post 'Timeline' for change history
-    # Retrieved 2025-12-15, License - CC BY-SA 3.0
-    while os.path.exists(newpath):
-        newpath = path + rf"\Messung_{counter}"
-        counter += 1
+    with open(newpath + r"\Config.json", mode = "r") as fl:
+        js = json.load(fl)
+
+    if "calibration_intervention" in js.keys() and js["calibration_intervention"] == 1:
+        calibration_overwrite = True
+    else:
+        calibration_overwrite = False
 
     signs = []
-    for i in [r"\Mes.wav", r"\Ref.wav"]:
-        srate, data = read(path + rf"\Messung_{counter-2}" + i)
+    if ref_signal == True:
+        for i in [r"\Mes.wav", r"\Ref.wav"]: # , r"\Ref.wav"
+            srate, data = read(path + rf"\Messung_{num}" + i)
+            signs.append(data)
+    else:
+        srate, data = read(path + rf"\Messung_{num}" + r"\Mes.wav")
         signs.append(data)
 
     sliced_signs = []
+    peak_index = []
 
     for sign, i in zip(signs, range(len(signs))):
-        sliced_signs.append(signal_slicing(sign))
+        plt.close("all")
+        if i == 0 and "peak_index_mes" in js.keys():
+            slices, peak = signal_slicing(sign, calibration_intervention, js["peak_index_mes"])
+        elif i == 1:
+            slices, peak = signal_slicing(sign, calibration_intervention, 56350)
+        else:
+            slices, peak = signal_slicing(sign, calibration_intervention)
+        peak_index.append(peak)
+        sliced_signs.append(slices)
 
     sti, ti = sti_comp(sliced_signs, newpath)
 
@@ -251,5 +278,23 @@ def main():
 
     plt_sav_results(sti, ti, newpath)
 
+    js["STI"] = sti
+    js["calibration_intervention"] = 0 if calibration_intervention == False else 1
+    if calibration_intervention == True and type(peak_index) != list[None]:
+        js["peak_index_ref"] = peak_index[0]
+    elif ref_signal == True:
+        js["peak_index_mes"] = peak_index[1]
+    
+    js = json.dumps(js, indent = 4)
+
+    with open(newpath + r"\Config.json", mode = "w") as fl:
+        fl.write(js)
+
+    plt.close("all")
+
+    del js, ti, sliced_signs, slices, data # type:ignore
+
 if __name__ == "__main__":
-    main()
+    path = r"C:\Programmieren\Praktikum\GPII\Data\STI"
+    for i in tqdm(range(len(os.listdir(path))-1), colour= "#20C20E"):
+        main(i+1)

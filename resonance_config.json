@@ -1,0 +1,14 @@
+{
+    "chirp_time"    : 30,
+    "f0"            : 80,
+    "f1"            : 1300,
+    "amp0"          : 0.8,
+    "amp1"          : 0.1,
+    "dead_time"     : 1,
+    "srate"         : 441000,
+    "cal_amp"       : 2,
+    "cal_freq"      : 1000.0,
+    "cal_amp_freq"  : 0.9,
+    "bitrate"       : 16,
+    "N"             : 100
+}
