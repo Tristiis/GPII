@@ -34,7 +34,7 @@ beta_k = [0.085, 0.078, 0.065, 0.011, 0.047, 0.095]
 with open('STI-14_config.json', 'r') as file:
     config = json.load(file)
 
-calib_csv = pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Mic_old.csv", header = 0)
+calib_csvs = [pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Mic_old.csv", header = 0), pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Mic_old.csv", header = 0)]
 
 calibration_overwrite = False
 test_phase = False
@@ -125,11 +125,11 @@ def signal_slicing(sign:np.ndarray, calibration_intervention: bool, peak_index =
     return arr, None
 
 # ---------- Equalizer ----------
-def equalize(sign):
+def equalize(sign, calib_csv):
     fft_sign = np.fft.rfft(sign)
     fq = np.fft.fftfreq(len(sign), d = 1/config["srate"])
-    spl = interpolate.make_smoothing_spline(calib_csv.x, calib_csv.y)
-    x = np.geomspace(min(fq), max(fq), len(fft_sign))
+    spl = interpolate.interp1d(calib_csv.x, calib_csv.y, fill_value = "extrapolate") # type: ignore
+    x = np.linspace(0, max(fq), len(fft_sign))
     calib = spl(x)
 
     fft_sign /= calib
@@ -231,11 +231,31 @@ def sti_comp(sliced_signs):
 
     return sti, ti
 
-def monte_carlo(sliced_signs, N):
-    sti_li = []
-    for i in range(N):
-        randomised_signs = 2
-        sti_comp(randomised_signs)
+def monte_carlo(sliced_signs):
+    def randomise(sign, rand_num):
+        fft_sign = np.fft.rfft(sign, n = len(sign))
+        fft_sign *= rand_num
+        return np.fft.irfft(sign, n = len(sign))
+
+    sti_li = np.empty(config["N"], dtype = np.float64)
+    ti_li = np.empty(shape = (config["N"], 7, 14), dtype = np.float64)
+    for i in tqdm(range(config["N"]), colour = "#FF13F0"):
+        randomised_signs = np.zeros(shape = (len(sliced_signs), 7,14, len(sliced_signs[0][0][0])), dtype = np.int32)
+        rand_num = np.random.normal(loc = 1, scale = config["std_mc"])
+        for sign in range(len(sliced_signs)):
+            for i_k in range(len(sliced_signs[sign])):
+                for j_fm in range(len(sliced_signs[sign][i_k])):
+                    randomised_signs[sign][i_k][j_fm] = randomise(sliced_signs[sign][i_k][j_fm], rand_num)
+
+        sti_li[i], ti_li[i] = sti_comp(randomised_signs)
+
+    u_sti = np.std(sti_li)
+    u_ti = np.std(ti_li)
+
+    plt.hist(sti_li)
+    plt.show()
+
+    return u_sti, u_ti
 
 def plt_sav_results(sti, ti, newpath):
     k = [k_vals[i]["f_c"] for i in k_vals]
@@ -299,17 +319,19 @@ def main(num):
         peak_index.append(peak)
         sliced_signs.append(slices)
 
-    for i_k in range(len(sliced_signs)):
-        for j_fm in range(len(sliced_signs)):
-            sliced_signs[i_k][j_fm] = equalize(sliced_signs[i_k][j_fm])
+    for sign in range(len(sliced_signs)):
+        for i_k in range(len(sliced_signs[sign])):
+            for j_fm in range(len(sliced_signs[sign][i_k])):
+                sliced_signs[sign][i_k][j_fm] = equalize(sliced_signs[sign][i_k][j_fm], calib_csvs[sign])
 
     sti, ti = sti_comp(sliced_signs)
 
-    #u_sti, u_ti = monte_carlo(sliced_signs, config["N"])
+    u_sti, u_ti = monte_carlo(sliced_signs)
 
     plt_sav_results(sti, ti, newpath)
 
     js["STI_wo_ref"] = sti
+    js["u_STI_wo_ref"] = u_sti
     js["calibration_intervention"] = 0 if calibration_intervention == False else 1
     if calibration_intervention == True and type(peak_index) != list[None]:
         js["peak_index_ref"] = peak_index[0]

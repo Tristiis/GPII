@@ -8,5 +8,5 @@
     "a_transient"   : 0.2,
     "bitrate"       : 16,
     "N"             : 100,
-    "std_mc"        : 20
+    "std_mc"        : 0.1
 }
