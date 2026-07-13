@@ -7,9 +7,9 @@ import acoustics.generator as generator
 from tqdm import tqdm
 from os import makedirs
 from scipy import signal
+from scipy import interpolate
 from scipy.signal import find_peaks
 from scipy.io.wavfile import read
-
 
 # ---------- Variables prescribed by the standard ----------
 
@@ -34,9 +34,23 @@ beta_k = [0.085, 0.078, 0.065, 0.011, 0.047, 0.095]
 with open('STI-14_config.json', 'r') as file:
     config = json.load(file)
 
+calib_csv = pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Mic_old.csv", header = 0)
+
 calibration_overwrite = False
 test_phase = False
-ref_signal = True
+ref_signal = False
+
+# ---------- SOS Filter ----------
+sos_low = signal.butter(20, 100, 'low', fs = config["srate"], output = "sos")
+
+band_filters = []
+
+for i_k in range(len(k_vals)):
+    low_f:float = k_vals[i_k]["f_c"] / np.sqrt(2)
+    high_f:float = np.sqrt(2) * k_vals[i_k]["f_c"]
+    sos_band = signal.butter(20, (low_f, high_f), "band", fs = config["srate"], analog = False, output = "sos")
+    band_filters.append(sos_band)
+
 
 # ---------- Intermediary preparation of the measurement data ----------
 
@@ -110,20 +124,30 @@ def signal_slicing(sign:np.ndarray, calibration_intervention: bool, peak_index =
         return arr, peak_index # type: ignore
     return arr, None
 
+# ---------- Equalizer ----------
+def equalize(sign):
+    fft_sign = np.fft.rfft(sign)
+    fq = np.fft.fftfreq(len(sign), d = 1/config["srate"])
+    spl = interpolate.make_smoothing_spline(calib_csv.x, calib_csv.y)
+    x = np.geomspace(min(fq), max(fq), len(fft_sign))
+    calib = spl(x)
+
+    fft_sign /= calib
+
+    sign = np.fft.irfft(fft_sign)
+
+    return sign
+
 # ---------- STI Computation ----------
 
-def sti_comp(sliced_signs, newpath:str):
-    sos_low = signal.butter(20, 100, 'low', fs = config["srate"], output = "sos")
+def sti_comp(sliced_signs):
     anti_transient = int(config["srate"] * config["a_transient"])
 
     def envelope_detection(sign:np.ndarray):
         arr = np.empty(shape = (len(k_vals), len(mod_vals)), dtype=np.ndarray)
         for i_k in tqdm(range(len(k_vals))):
-            low_f:float = k_vals[i_k]["f_c"] / np.sqrt(2)
-            high_f:float = np.sqrt(2) * k_vals[i_k]["f_c"]
-            sos_band = signal.butter(20, (low_f, high_f), "band", fs = config["srate"], analog = False, output = "sos")
             for j_f_m in range(len(mod_vals)):
-                arr[i_k, j_f_m] = signal.sosfiltfilt(sos_band, sign[i_k, j_f_m])
+                arr[i_k, j_f_m] = signal.sosfiltfilt(band_filters[i_k], sign[i_k, j_f_m])
                 arr[i_k, j_f_m] *= arr[i_k, j_f_m]
                 y = signal.sosfiltfilt(sos_low, arr[i_k, j_f_m])
                 arr[i_k, j_f_m] = y[anti_transient:]
@@ -207,8 +231,11 @@ def sti_comp(sliced_signs, newpath:str):
 
     return sti, ti
 
-def monte_carlo(sliced_signals, N):
-    pass
+def monte_carlo(sliced_signs, N):
+    sti_li = []
+    for i in range(N):
+        randomised_signs = 2
+        sti_comp(randomised_signs)
 
 def plt_sav_results(sti, ti, newpath):
     k = [k_vals[i]["f_c"] for i in k_vals]
@@ -216,7 +243,7 @@ def plt_sav_results(sti, ti, newpath):
 
     fig_ti, axs_ti = plt.subplots()
 
-    im = axs_ti.imshow(ti)
+    im = axs_ti.imshow(ti, vmin=0, vmax=1)
 
     axs_ti.set_title("Transfer Index TI")
     axs_ti.set_xticks(range(len(mod_vals)), labels=mod_vals,rotation=45, ha="right", rotation_mode="anchor")
@@ -228,11 +255,11 @@ def plt_sav_results(sti, ti, newpath):
     fig_ti.tight_layout()
     
     if test_phase == False: #  and not os.path.exists(newpath + r"\TI_plot.pdf")
-        fig_ti.savefig(fname = newpath + r"\TI_plot.pdf", format = "pdf")
+        fig_ti.savefig(fname = newpath + r"\TI_plot_wo_ref.pdf", format = "pdf") # _wo_ref
         df = pd.DataFrame(ti, index = k)
-        df.to_csv(newpath + r"\TI_Daten.csv", sep = ";", header = mod_vals)
+        df.to_csv(newpath + r"\TI_Daten_wo_ref.csv", sep = ";", header = mod_vals) # _wo_ref
 
-    print(f"STI Value: {sti}")
+    #print(f"STI Value: {sti}")
     #plt.show()
 
 def main(num):
@@ -257,7 +284,7 @@ def main(num):
     else:
         srate, data = read(path + rf"\Messung_{num}" + r"\Mes.wav")
         signs.append(data)
-
+    
     sliced_signs = []
     peak_index = []
 
@@ -272,13 +299,17 @@ def main(num):
         peak_index.append(peak)
         sliced_signs.append(slices)
 
-    sti, ti = sti_comp(sliced_signs, newpath)
+    for i_k in range(len(sliced_signs)):
+        for j_fm in range(len(sliced_signs)):
+            sliced_signs[i_k][j_fm] = equalize(sliced_signs[i_k][j_fm])
+
+    sti, ti = sti_comp(sliced_signs)
 
     #u_sti, u_ti = monte_carlo(sliced_signs, config["N"])
 
     plt_sav_results(sti, ti, newpath)
 
-    js["STI"] = sti
+    js["STI_wo_ref"] = sti
     js["calibration_intervention"] = 0 if calibration_intervention == False else 1
     if calibration_intervention == True and type(peak_index) != list[None]:
         js["peak_index_ref"] = peak_index[0]
@@ -296,5 +327,6 @@ def main(num):
 
 if __name__ == "__main__":
     path = r"C:\Programmieren\Praktikum\GPII\Data\STI"
-    for i in tqdm(range(len(os.listdir(path))-1), colour= "#20C20E"):
-        main(i+1)
+    while True:
+        for i in tqdm(range(len(os.listdir(path))-2), colour= "#20C20E"):
+            main(i+1)

@@ -7,5 +7,6 @@
     "cal_amp_freq"  : 0.9,
     "a_transient"   : 0.2,
     "bitrate"       : 16,
-    "N"             : 100
+    "N"             : 100,
+    "std_mc"        : 20
 }
