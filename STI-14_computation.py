@@ -40,18 +40,6 @@ calibration_overwrite = False
 test_phase = False
 ref_signal = False
 
-# ---------- SOS Filter ----------
-sos_low = signal.butter(20, 100, 'low', fs = config["srate"], output = "sos")
-
-band_filters = []
-
-for i_k in range(len(k_vals)):
-    low_f:float = k_vals[i_k]["f_c"] / np.sqrt(2)
-    high_f:float = np.sqrt(2) * k_vals[i_k]["f_c"]
-    sos_band = signal.butter(20, (low_f, high_f), "band", fs = config["srate"], analog = False, output = "sos")
-    band_filters.append(sos_band)
-
-
 # ---------- Intermediary preparation of the measurement data ----------
 
 def signal_slicing(sign:np.ndarray, calibration_intervention: bool, peak_index = None):
@@ -121,13 +109,17 @@ def signal_slicing(sign:np.ndarray, calibration_intervention: bool, peak_index =
             arr[k, f_m] = sliced_signals[counter]
             counter += 1
     if calibration_intervention == True:
-        return arr, peak_index # type: ignore
-    return arr, None
+        # Source - https://stackoverflow.com/a/13747443
+        # Posted by Bitwise
+        # Retrieved 2026-07-15, License - CC BY-SA 3.0
+        # d=np.array(dataPoints.tolist())
+        return np.array(arr.tolist()), peak_index # type: ignore
+    return np.array(arr.tolist()), None
 
 # ---------- Equalizer ----------
 def equalize(sign, calib_csv):
     fft_sign = np.fft.rfft(sign)
-    fq = np.fft.fftfreq(len(sign), d = 1/config["srate"])
+    fq = np.fft.rfftfreq(len(sign), d = 1/config["srate"])
     spl = interpolate.interp1d(calib_csv.x, calib_csv.y, fill_value = "extrapolate") # type: ignore
     x = np.linspace(0, max(fq), len(fft_sign))
     calib = spl(x)
@@ -140,61 +132,86 @@ def equalize(sign, calib_csv):
 
 # ---------- STI Computation ----------
 
-def sti_comp(sliced_signs):
-    anti_transient = int(config["srate"] * config["a_transient"])
+# low pass for envelope detection
+sos_low = signal.butter(20, 100, 'low', fs = config["srate"], output = "sos")
 
-    def envelope_detection(sign:np.ndarray):
-        arr = np.empty(shape = (len(k_vals), len(mod_vals)), dtype=np.ndarray)
-        for i_k in tqdm(range(len(k_vals))):
-            for j_f_m in range(len(mod_vals)):
-                arr[i_k, j_f_m] = signal.sosfiltfilt(band_filters[i_k], sign[i_k, j_f_m])
-                arr[i_k, j_f_m] *= arr[i_k, j_f_m]
-                y = signal.sosfiltfilt(sos_low, arr[i_k, j_f_m])
-                arr[i_k, j_f_m] = y[anti_transient:]
-        return arr
+# band filters for sti comp
+band_filters = []
+for i_k in range(len(k_vals)):
+    low_f:float = k_vals[i_k]["f_c"] / np.sqrt(2)
+    high_f:float = np.sqrt(2) * k_vals[i_k]["f_c"]
+    sos_band = signal.butter(20, (low_f, high_f), "band", fs = config["srate"], analog = False, output = "sos")
+    band_filters.append([sos_band for _ in range(14)])
+band_filters = np.array(band_filters)
 
-    def modulation_depths(I:np.ndarray, time:np.ndarray):
-        arr = np.empty(shape = (len(k_vals), len(mod_vals)), dtype=np.ndarray)
-        for i_k in tqdm(range(len(k_vals))):
-            for j_f_m in range(len(mod_vals)):
-                sin_sum = (np.sum(I[i_k, j_f_m] * np.sin(2 * np.pi * mod_vals[j_f_m] * time)))**2
-                cos_sum = (np.sum(I[i_k, j_f_m] * np.cos(2 * np.pi * mod_vals[j_f_m] * time)))**2
-                denom_sum = np.sum(I[i_k, j_f_m])
-                arr[i_k, j_f_m] = 2 * np.sqrt(sin_sum + cos_sum) / denom_sum
-        return arr
-    
-    def limit_mod_ratio(m):
-        return min([m, 1])
-    
-    def auditory_effects(m):
-        pass
 
-    def snr_comp(m):
-        if m == 1:
+# constants and functions for sti comp
+anti_transient = int(config["srate"] * config["a_transient"])
+
+def envelope_detection(sign):
+    arr = np.empty(shape = (len(k_vals), len(mod_vals)), dtype=np.ndarray)
+    for i_k in range(len(k_vals)):
+        for j_f_m in range(len(mod_vals)):
+            arr[i_k, j_f_m] = signal.sosfiltfilt(band_filters[i_k,j_f_m], sign[i_k, j_f_m])
+            arr[i_k, j_f_m] *= arr[i_k, j_f_m]
+            y = signal.sosfiltfilt(sos_low, arr[i_k, j_f_m])
+            arr[i_k, j_f_m] = y[anti_transient:]
+    return arr
+    """arr = signal.sosfiltfilt(band_filters, sign)
+    arr *= arr
+    y = signal.sosfiltfilt(sos_low, arr)
+    arr = y[:, :, anti_transient:]
+    return arr"""
+
+def modulation_depths(I:np.ndarray, time:np.ndarray):
+    arr = np.empty(shape = (len(k_vals), len(mod_vals)), dtype=np.ndarray)
+    tmp_mod_vals = [mod_vals for _ in range(len(k_vals))]
+    def tmp(I, mods):
+        sin_sum = (np.sum(I * np.sin(2 * np.pi * mods * time)))**2
+        cos_sum = (np.sum(I * np.cos(2 * np.pi * mods * time)))**2
+        denom_sum = np.sum(I)
+        return 2 * np.sqrt(sin_sum + cos_sum) / denom_sum
+    tmp = np.vectorize(tmp)
+    return tmp(I, tmp_mod_vals)
+
+def limit_mod_ratio(m):
+    return min([m, 1])
+
+def auditory_effects(m):
+    pass
+
+def snr_comp(m):
+    if m == 1:
+        return 15
+    snr = 10 * np.log10(m / (1 - m))
+    match snr:
+        case _ if snr < -15:
+            return -15
+        case _ if snr > 15:
             return 15
-        snr = 10 * np.log10(m / (1 - m))
-        match snr:
-            case _ if snr < -15:
-                return -15
-            case _ if snr > 15:
-                return 15
-            case _:
-                return snr
-    
-    def transmission_index(snr):
-        return (snr + 15) / 30
-    
-    def modulation_transfer_index(ti):
-        mti = np.empty(len(k_vals))
-        for k in range(len(k_vals)):
-            mti[k] = np.mean(ti[k])
-        return mti
+        case _:
+            return snr
 
-    def sti_last_step(mti):
-        first_term = np.sum([alpha_k[k] * mti[k] for k in range(len(k_vals))])
-        second_term = np.sum([beta_k[k] * np.sqrt(mti[k] * mti[k+1]) for k in range(len(k_vals)-1)])
-        return first_term - second_term
+def transmission_index(snr):
+    return (snr + 15) / 30
 
+def modulation_transfer_index(ti):
+    mti = np.empty(len(k_vals))
+    for k in range(len(k_vals)):
+        mti[k] = np.mean(ti[k])
+    return mti
+
+def sti_last_step(mti):
+    first_term = np.sum([alpha_k[k] * mti[k] for k in range(len(k_vals))])
+    second_term = np.sum([beta_k[k] * np.sqrt(mti[k] * mti[k+1]) for k in range(len(k_vals)-1)])
+    return first_term - second_term
+
+limit_mod_ratio_vec = np.vectorize(limit_mod_ratio)
+snr_comp_vec = np.vectorize(snr_comp)
+transmission_index_vec = np.vectorize(transmission_index)
+
+
+def sti_comp(sliced_signs):
     params = {
         "sign": sliced_signs,
         "I_k_m": [],
@@ -214,15 +231,12 @@ def sti_comp(sliced_signs):
         params["mod_dep"].append(modulation_depths(params["I_k_m"][0], time))
         m_k_fm = params["mod_dep"][0] / 1
 
-    limit_mod_ratio_vec = np.vectorize(limit_mod_ratio)
     m_k_fm = limit_mod_ratio_vec(m_k_fm)
 
     # steps 5 and 6 are still missing because we first need to understand what value to use for I_k
 
-    snr_comp_vec = np.vectorize(snr_comp)
     snr_k_fm = snr_comp_vec(m_k_fm)
-
-    transmission_index_vec = np.vectorize(transmission_index)
+    
     ti = transmission_index_vec(snr_k_fm)
 
     mti = modulation_transfer_index(ti)
@@ -231,29 +245,48 @@ def sti_comp(sliced_signs):
 
     return sti, ti
 
-def monte_carlo(sliced_signs):
-    def randomise(sign, rand_num):
-        fft_sign = np.fft.rfft(sign, n = len(sign))
-        fft_sign *= rand_num
-        return np.fft.irfft(sign, n = len(sign))
+# monte carlo constants
+k_fq = np.array([k_vals[i]["f_c"] for i in k_vals]).reshape(7,1).repeat(14, -1).reshape(7,14,1)
+def randomise(sign, k_fq):
+    fft_sign = np.fft.rfft(sign, n = sign.shape[-1], axis = -1)
+    fq = np.fft.rfftfreq(sign.shape[-1], d = 1/config["srate"])
+    k_fq = k_fq.repeat(len(fq), -1)
+    boa = k_fq / np.sqrt(2) < fq
+    bob = fq < np.sqrt(2) * k_fq
+    # Source - https://stackoverflow.com/a/2357785
+    # Posted by Steve Tjoa
+    # Retrieved 2026-07-15, License - CC BY-SA 2.5
+    # import scipy
+    # X = scipy.rand(9,4,1)
+    # Y = X.repeat(4096,2)
+    rand = np.random.normal(loc = 1, scale = config["std_mc"], size = (7,14,1)).repeat(len(fq), -1)
+    multiplier = np.where(boa & bob, rand, 1)
+    fft_sign *= multiplier
+    return np.fft.irfft(fft_sign, n = sign.shape[-1], axis = -1)
 
+def monte_carlo(sliced_signs, newpath):
     sti_li = np.empty(config["N"], dtype = np.float64)
     ti_li = np.empty(shape = (config["N"], 7, 14), dtype = np.float64)
+
     for i in tqdm(range(config["N"]), colour = "#FF13F0"):
-        randomised_signs = np.zeros(shape = (len(sliced_signs), 7,14, len(sliced_signs[0][0][0])), dtype = np.int32)
-        rand_num = np.random.normal(loc = 1, scale = config["std_mc"])
-        for sign in range(len(sliced_signs)):
-            for i_k in range(len(sliced_signs[sign])):
-                for j_fm in range(len(sliced_signs[sign][i_k])):
-                    randomised_signs[sign][i_k][j_fm] = randomise(sliced_signs[sign][i_k][j_fm], rand_num)
+        randomised_signs = []
+        for sign in sliced_signs:
+            randomised_signs.append(randomise(sign, k_fq))
 
         sti_li[i], ti_li[i] = sti_comp(randomised_signs)
 
     u_sti = np.std(sti_li)
     u_ti = np.std(ti_li)
 
-    plt.hist(sti_li)
-    plt.show()
+    print(f"STI: {np.mean(sti_li)}")
+    print(f"Unc.Sti: {u_sti}")
+
+    fig, axs = plt.subplots()
+
+    axs.hist(sti_li)
+    fig.savefig(fname = newpath + r"\Unc_hist.pdf", format = "pdf")
+    plt.close("all")
+    #plt.show()
 
     return u_sti, u_ti
 
@@ -326,7 +359,7 @@ def main(num):
 
     sti, ti = sti_comp(sliced_signs)
 
-    u_sti, u_ti = monte_carlo(sliced_signs)
+    u_sti, u_ti = monte_carlo(sliced_signs, newpath)
 
     plt_sav_results(sti, ti, newpath)
 
