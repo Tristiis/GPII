@@ -144,7 +144,6 @@ for i_k in range(len(k_vals)):
     band_filters.append([sos_band for _ in range(14)])
 band_filters = np.array(band_filters)
 
-
 # constants and functions for sti comp
 anti_transient = int(config["srate"] * config["a_transient"])
 
@@ -152,7 +151,7 @@ def envelope_detection(sign):
     arr = np.empty(shape = (len(k_vals), len(mod_vals)), dtype=np.ndarray)
     for i_k in range(len(k_vals)):
         for j_f_m in range(len(mod_vals)):
-            arr[i_k, j_f_m] = signal.sosfiltfilt(band_filters[i_k,j_f_m], sign[i_k, j_f_m])
+            arr[i_k, j_f_m] = signal.sosfiltfilt(band_filters[i_k][j_f_m], sign[i_k, j_f_m])
             arr[i_k, j_f_m] *= arr[i_k, j_f_m]
             y = signal.sosfiltfilt(sos_low, arr[i_k, j_f_m])
             arr[i_k, j_f_m] = y[anti_transient:]
