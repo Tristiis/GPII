@@ -5,12 +5,11 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-
 def main():
     path = r"C:\Programmieren\Praktikum\GPII\Data\STI"
 
     js_files = []
-    for i in tqdm(range(len(os.listdir(path))-1), colour= "#20C20E"):
+    for i in tqdm(range(len(os.listdir(path))-2), colour= "#20C20E"):
         newpath = path + rf"\Messung_{i}"
         with open(newpath + r"\Config.json") as fl:
             data = json.load(fl)
@@ -39,6 +38,7 @@ def main():
         force.append((f * 2 * l)**2 * mu)
 
     df["Kraft"] = force
+    df["rel_u_STI_wo_ref"] = df["u_STI_wo_ref"] / df["STI_wo_ref"]
     df["Approx_dist"] = [round(i) for i in df["Abstand"]]
 
     df["Material_Boden"] = df["Material_Boden"].fillna("Laborbuch_Papier")

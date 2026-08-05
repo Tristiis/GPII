@@ -149,7 +149,7 @@ anti_transient = int(config["srate"] * config["a_transient"])
 
 def envelope_detection(sign):
     arr = np.empty(shape = (len(k_vals), len(mod_vals)), dtype=np.ndarray)
-    for i_k in range(len(k_vals)):
+    for i_k in tqdm(range(len(k_vals))):
         for j_f_m in range(len(mod_vals)):
             arr[i_k, j_f_m] = signal.sosfiltfilt(band_filters[i_k][j_f_m], sign[i_k, j_f_m])
             arr[i_k, j_f_m] *= arr[i_k, j_f_m]
@@ -174,6 +174,7 @@ def modulation_depths(I:np.ndarray, time:np.ndarray):
     return tmp(I, tmp_mod_vals)
 
 def limit_mod_ratio(m):
+    m = max([m, 1e-50])
     return min([m, 1])
 
 def auditory_effects(m):
@@ -210,25 +211,29 @@ snr_comp_vec = np.vectorize(snr_comp)
 transmission_index_vec = np.vectorize(transmission_index)
 
 
-def sti_comp(sliced_signs):
-    params = {
-        "sign": sliced_signs,
-        "I_k_m": [],
-        "mod_dep": []
-    }
+def sti_comp(sliced_signs, rand_m = None, init = False):
+    if type(rand_m) == type(None):
+        params = {
+            "sign": sliced_signs,
+            "I_k_m": [],
+            "mod_dep": []
+        }
 
-    time = np.arange(0, config["sample_time"] - 2 * config["a_transient"], 1 / config["srate"])
+        time = np.arange(0, config["sample_time"] - 2 * config["a_transient"], 1 / config["srate"])
 
-    if ref_signal == True:
-        for i in range(2):
-            params["I_k_m"].append(envelope_detection(params["sign"][i]))
-            params["mod_dep"].append(modulation_depths(params["I_k_m"][i], time))
+        if ref_signal == True:
+            for i in range(2):
+                params["I_k_m"].append(envelope_detection(params["sign"][i]))
+                params["mod_dep"].append(modulation_depths(params["I_k_m"][i], time))
 
-        m_k_fm = params["mod_dep"][0] / params["mod_dep"][1]
+            m_k_fm = params["mod_dep"][0] / params["mod_dep"][1]
+        else:
+            params["I_k_m"].append(envelope_detection(params["sign"][0]))
+            params["mod_dep"].append(modulation_depths(params["I_k_m"][0], time))
+            m_k_fm = params["mod_dep"][0] / 1
+            expected_m = m_k_fm.copy()
     else:
-        params["I_k_m"].append(envelope_detection(params["sign"][0]))
-        params["mod_dep"].append(modulation_depths(params["I_k_m"][0], time))
-        m_k_fm = params["mod_dep"][0] / 1
+        m_k_fm = rand_m
 
     m_k_fm = limit_mod_ratio_vec(m_k_fm)
 
@@ -242,7 +247,9 @@ def sti_comp(sliced_signs):
 
     sti = sti_last_step(mti)
 
-    return sti, ti
+    if init == False:
+        return sti, ti
+    return sti, ti, expected_m
 
 # monte carlo constants
 k_fq = np.array([k_vals[i]["f_c"] for i in k_vals]).reshape(7,1).repeat(14, -1).reshape(7,14,1)
@@ -263,7 +270,7 @@ def randomise(sign, k_fq):
     fft_sign *= multiplier
     return np.fft.irfft(fft_sign, n = sign.shape[-1], axis = -1)
 
-def monte_carlo(sliced_signs, newpath):
+def monte_carlo(sliced_signs, newpath, sti):
     sti_li = np.empty(config["N"], dtype = np.float64)
     ti_li = np.empty(shape = (config["N"], 7, 14), dtype = np.float64)
 
@@ -279,11 +286,41 @@ def monte_carlo(sliced_signs, newpath):
 
     print(f"STI: {np.mean(sti_li)}")
     print(f"Unc.Sti: {u_sti}")
+    print(f"Diff. expc./MC: {sti-np.mean(sti_li)}")
 
     fig, axs = plt.subplots()
 
     axs.hist(sti_li)
     fig.savefig(fname = newpath + r"\Unc_hist.pdf", format = "pdf")
+    plt.close("all")
+    #plt.show()
+
+    return u_sti, u_ti
+
+def monte_carlo_wo_ref(expected_m, newpath, sti):
+    sti_li = np.empty(config["N"], dtype = np.float64)
+    ti_li = np.empty(shape = (config["N"], 7, 14), dtype = np.float64)
+
+    for i in tqdm(range(config["N"]), colour = "#FF13F0"):
+        rand_m = expected_m + np.random.normal(loc = 0, scale = config["std_mc"], size = (7,1)).repeat(14, -1)
+
+        sti_li[i], ti_li[i] = sti_comp(sliced_signs = None, rand_m = rand_m)
+
+    u_sti = np.std(sti_li)
+    u_ti = np.std(ti_li)
+
+    print(f"STI: {np.mean(sti_li)}")
+    print(f"Unc.Sti: {u_sti}")
+    print(f"Diff. expc./MC: {sti-np.mean(sti_li)}")
+
+    fig, axs = plt.subplots()
+
+    axs.hist(sti_li, bins = "auto")
+    axs.set_title("Monte Carlo uncertainty distribution")
+    axs.set_xlabel("Counts []")
+    axs.set_ylabel("STI []")
+    axs.grid()
+    fig.savefig(fname = newpath + r"\Unc_hist_wo_ref.pdf", format = "pdf")
     plt.close("all")
     #plt.show()
 
@@ -302,6 +339,7 @@ def plt_sav_results(sti, ti, newpath):
     axs_ti.set_yticks(range(len(k_vals)), labels=k)
     axs_ti.set_xlabel("Modulation Frequencies [Hz]")
     axs_ti.set_ylabel("Center frequency [Hz]")
+    axs_ti.grid()
 
     fig_ti.colorbar(im, ax=axs_ti, orientation='horizontal', fraction=.1)
     fig_ti.tight_layout()
@@ -356,9 +394,12 @@ def main(num):
             for j_fm in range(len(sliced_signs[sign][i_k])):
                 sliced_signs[sign][i_k][j_fm] = equalize(sliced_signs[sign][i_k][j_fm], calib_csvs[sign])
 
-    sti, ti = sti_comp(sliced_signs)
-
-    u_sti, u_ti = monte_carlo(sliced_signs, newpath)
+    if ref_signal == True:
+        sti, ti = sti_comp(sliced_signs)
+        u_sti, u_ti = monte_carlo(sliced_signs, newpath, sti)
+    else:
+        sti, ti, expected_m = sti_comp(sliced_signs, init = True)
+        u_sti, u_ti = monte_carlo_wo_ref(expected_m, newpath, sti)
 
     plt_sav_results(sti, ti, newpath)
 
