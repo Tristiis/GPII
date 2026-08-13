@@ -1,12 +1,10 @@
 import json
-import numba
+import scienceplots
 import os.path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import acoustics.generator as generator
 from tqdm import tqdm
-from os import makedirs
 from scipy import signal
 from scipy import fftpack
 from scipy import interpolate
@@ -16,8 +14,6 @@ from scipy.io.wavfile import read
 # Posted by Herman Schaaf, modified by community. See post 'Timeline' for change history
 # Retrieved 2026-06-24, License - CC BY-SA 4.0
 
-plt.rcParams.update({'font.size': 18})
-
 # ---------- System Variables ----------
 
 with open('resonance_config.json', 'r') as file:
@@ -25,6 +21,23 @@ with open('resonance_config.json', 'r') as file:
 
 calibration_overwrite = True
 test_phase = False
+
+calib_csvs = [pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Mic_old.csv", header = 0), pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\CHP90.csv", header = 0)]
+
+# ---------- Equalize ----------
+
+def equalize(sign, calib_csv):
+    fft_sign = np.fft.rfft(sign)
+    fq = np.fft.rfftfreq(len(sign), d = 1/config["srate"])
+    spl = interpolate.interp1d(calib_csv.x, calib_csv.y, fill_value = "extrapolate") # type: ignore
+    x = np.linspace(0, max(fq), len(fft_sign))
+    calib = spl(x)
+
+    fft_sign /= calib
+
+    sign = np.fft.irfft(fft_sign)
+
+    return sign
 
 # ---------- Intermediary preparation of the measurement data ----------
 
@@ -91,59 +104,55 @@ def res_comp(sign, newpath:str, srate):
     """
     s_env = s_env / max(s_env)
 
-    fft_data = fftpack.fft(sign)
-    def phase(z): # Calculates the phase of a complex number
-        r = np.absolute(z)
-        return (z.real/r + 1j * z.imag/r)
-    phase_data = [phase(i) for i in fft_data]
-    plt.plot(phase_data)
+    fft_data = fftpack.rfft(sign)
+    phase_data = np.angle(fft_data)
+    plt.plot(freq, phase_data)
     plt.show()
+
+    for _ in range(2):
+        s_env = signal.savgol_filter(s_env, 75, 2)
 
     return freq, s_env
 
-def monte_carlo(sliced_signals, N):
-    pass
-
 def plt_sav_results(freq, res, newpath):
-    fig, axs = plt.subplots()
+    pd.DataFrame({"freq":freq, "res": res}).to_csv(newpath + r"\Res_data.csv", sep = ";")
 
-    axs.plot(freq, res)
+    with plt.style.context("science"):
+        fig, axs = plt.subplots()
 
-    axs.set_title("Frequency Response")
-    axs.set_xlabel("Frequencies [Hz]")
-    axs.set_ylabel("Arb. Units")
+        axs.plot(freq, res)
 
-    fig.tight_layout()
-    
-    if test_phase == False:
-        fig.savefig(fname = newpath + r"\Freq_Res_plot.pdf", format = "pdf")
-    #plt.show()
-    plt.close("all")
+        axs.set_title("Frequency Response")
+        axs.set_xlabel("Frequencies [Hz]")
+        axs.set_ylabel("Arb. Units")
+
+        fig.tight_layout()
+        
+        if test_phase == False:
+            fig.savefig(fname = newpath + r"\Freq_Res_plot.pdf", format = "pdf")
+        #plt.show()
+        plt.close("all")
 
 def main(num):
     path = r"C:\Programmieren\Praktikum\GPII\Data\Res"
-    newpath = path + rf"\Messung_{num}"
-    """
-    with open(newpath + r"\Config.json", mode = "r") as fl:
-        js = json.load(fl)
-    """
     newpath = path + rf"\Messung_{num}"
 
     srate, sign = read(newpath + r"\Mes.wav")
 
     sign = signal_slicing(sign, srate)
 
-    freq, res = res_comp(sign, newpath, srate)
+    for i in calib_csvs:
+        sign = equalize(sign, i)
 
-    #u_sti, u_ti = monte_carlo(sliced_signs, config["N"])
+    freq, res = res_comp(sign, newpath, srate)
 
     plt_sav_results(freq, res, newpath)
 
 
 if __name__ == "__main__":
     path = r"C:\Programmieren\Praktikum\GPII\Data\Res"
-    """
-    for i in tqdm(range(len(os.listdir(path))), colour= "#20C20E"):
+    
+    for i in tqdm(range(22, 31), colour= "#20C20E"):
         main(i)
-    """
-    main(5)
+    
+    #main(5)

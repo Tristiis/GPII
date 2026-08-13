@@ -1,4 +1,5 @@
 import json
+import scienceplots
 import os.path
 import numpy as np
 import pandas as pd

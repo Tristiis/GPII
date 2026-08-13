@@ -1,5 +1,6 @@
 import os
 import json
+import scienceplots
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -288,12 +289,13 @@ def monte_carlo(sliced_signs, newpath, sti):
     print(f"Unc.Sti: {u_sti}")
     print(f"Diff. expc./MC: {sti-np.mean(sti_li)}")
 
-    fig, axs = plt.subplots()
+    with plt.style.context("science"):
+        fig, axs = plt.subplots()
 
-    axs.hist(sti_li)
-    fig.savefig(fname = newpath + r"\Unc_hist.pdf", format = "pdf")
-    plt.close("all")
-    #plt.show()
+        axs.hist(sti_li)
+        fig.savefig(fname = newpath + r"\Unc_hist.pdf", format = "pdf")
+        plt.close("all")
+        #plt.show()
 
     return u_sti, u_ti
 
@@ -313,16 +315,17 @@ def monte_carlo_wo_ref(expected_m, newpath, sti):
     print(f"Unc.Sti: {u_sti}")
     print(f"Diff. expc./MC: {sti-np.mean(sti_li)}")
 
-    fig, axs = plt.subplots()
+    with plt.style.context("science"):
+        fig, axs = plt.subplots()
 
-    axs.hist(sti_li, bins = "auto")
-    axs.set_title("Monte Carlo uncertainty distribution")
-    axs.set_xlabel("Counts []")
-    axs.set_ylabel("STI []")
-    axs.grid()
-    fig.savefig(fname = newpath + r"\Unc_hist_wo_ref.pdf", format = "pdf")
-    plt.close("all")
-    #plt.show()
+        axs.hist(sti_li, bins = "auto")
+        axs.set_title("Monte Carlo uncertainty distribution")
+        axs.set_xlabel("Counts []")
+        axs.set_ylabel("STI []")
+        axs.grid()
+        fig.savefig(fname = newpath + r"\Unc_hist_wo_ref.pdf", format = "pdf")
+        plt.close("all")
+        #plt.show()
 
     return u_sti, u_ti
 
@@ -330,27 +333,28 @@ def plt_sav_results(sti, ti, newpath):
     k = [k_vals[i]["f_c"] for i in k_vals]
     k = [f"{i/1000}k" if i >= 1000 else i for i in k]
 
-    fig_ti, axs_ti = plt.subplots()
+    with plt.style.context("science"):
+        fig_ti, axs_ti = plt.subplots()
 
-    im = axs_ti.imshow(ti, vmin=0, vmax=1)
+        im = axs_ti.imshow(ti, vmin=0, vmax=1)
 
-    axs_ti.set_title("Transfer Index TI")
-    axs_ti.set_xticks(range(len(mod_vals)), labels=mod_vals,rotation=45, ha="right", rotation_mode="anchor")
-    axs_ti.set_yticks(range(len(k_vals)), labels=k)
-    axs_ti.set_xlabel("Modulation Frequencies [Hz]")
-    axs_ti.set_ylabel("Center frequency [Hz]")
-    axs_ti.grid()
+        axs_ti.set_title("Transfer Index TI")
+        axs_ti.set_xticks(range(len(mod_vals)), labels=mod_vals,rotation=45, ha="right", rotation_mode="anchor")
+        axs_ti.set_yticks(range(len(k_vals)), labels=k)
+        axs_ti.set_xlabel("Modulation Frequencies [Hz]")
+        axs_ti.set_ylabel("Center frequency [Hz]")
+        axs_ti.grid()
 
-    fig_ti.colorbar(im, ax=axs_ti, orientation='horizontal', fraction=.1)
-    fig_ti.tight_layout()
-    
-    if test_phase == False: #  and not os.path.exists(newpath + r"\TI_plot.pdf")
-        fig_ti.savefig(fname = newpath + r"\TI_plot_wo_ref.pdf", format = "pdf") # _wo_ref
-        df = pd.DataFrame(ti, index = k)
-        df.to_csv(newpath + r"\TI_Daten_wo_ref.csv", sep = ";", header = mod_vals) # _wo_ref
+        fig_ti.colorbar(im, ax=axs_ti, orientation='horizontal', fraction=.1)
+        fig_ti.tight_layout()
+        
+        if test_phase == False: #  and not os.path.exists(newpath + r"\TI_plot.pdf")
+            fig_ti.savefig(fname = newpath + r"\TI_plot_wo_ref.pdf", format = "pdf") # _wo_ref
+            df = pd.DataFrame(ti, index = k)
+            df.to_csv(newpath + r"\TI_Daten_wo_ref.csv", sep = ";", header = mod_vals) # _wo_ref
 
-    #print(f"STI Value: {sti}")
-    #plt.show()
+        #print(f"STI Value: {sti}")
+        #plt.show()
 
 def main(num):
     global calibration_overwrite
