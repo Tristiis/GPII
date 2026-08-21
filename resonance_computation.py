@@ -8,7 +8,8 @@ from tqdm import tqdm
 from scipy import signal
 from scipy import fftpack
 from scipy import interpolate
-from scipy.io.wavfile import read
+from scipy import integrate
+from scipy.io.wavfile import read, write
 
 # Source - https://stackoverflow.com/a/3900167
 # Posted by Herman Schaaf, modified by community. See post 'Timeline' for change history
@@ -20,28 +21,13 @@ with open('resonance_config.json', 'r') as file:
     config = json.load(file)
 
 calibration_overwrite = True
-test_phase = False
+test_phase = True
 
-calib_csvs = [pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Mic_old.csv", header = 0), pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\CHP90.csv", header = 0)]
-
-# ---------- Equalize ----------
-
-def equalize(sign, calib_csv):
-    fft_sign = np.fft.rfft(sign)
-    fq = np.fft.rfftfreq(len(sign), d = 1/config["srate"])
-    spl = interpolate.interp1d(calib_csv.x, calib_csv.y, fill_value = "extrapolate") # type: ignore
-    x = np.linspace(0, max(fq), len(fft_sign))
-    calib = spl(x)
-
-    fft_sign /= calib
-
-    sign = np.fft.irfft(fft_sign)
-
-    return sign
+calib_csvs = [[pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Res_data_mes.csv", sep = ";")],[pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Res_data_ref.csv", sep = ";")]]
 
 # ---------- Intermediary preparation of the measurement data ----------
 
-def signal_slicing(sign:np.ndarray, srate):
+def signal_slicing(sign:np.ndarray, srate:int, index:int):
     silence = config["dead_time"] * srate
     sample_time_size = config["chirp_time"] * srate
     peak_width = int(srate/(2 * config["cal_amp_freq"]))
@@ -58,7 +44,9 @@ def signal_slicing(sign:np.ndarray, srate):
 
     lag = lags[peaks[np.where(props["prominences"] == max(props["prominences"]))]][0] + peak_width//2
 
-    if calibration_overwrite == False:
+    if index == 1:
+        return sign[2 * silence + peak_width : 2 * silence + peak_width + sample_time_size]
+    elif calibration_overwrite == False:
         plt.plot(sign, rasterized = True)
         plt.axvline(lag)
 
@@ -84,70 +72,93 @@ def signal_slicing(sign:np.ndarray, srate):
                 print("Please only input integers.")
                 peak_index = input("Peak Index: ")
 
-            sign = sign[int(peak_index) + peak_width + silence:]
+            sign = sign[int(peak_index) + peak_width + silence:int(peak_index) + peak_width + silence + sample_time_size]
         else:
-            sign = sign[lag + peak_width//2 + silence:]
+            sign = sign[lag + peak_width//2 + silence: lag + peak_width//2 + silence + sample_time_size]
     else:
-        sign = sign[lag + peak_width//2 + silence:]
+        sign = sign[lag + peak_width//2 + silence:lag + peak_width//2 + silence + sample_time_size]
     plt.close("all")
     return sign
 
 # ---------- Resonance Computation ----------
 
-def res_comp(sign, newpath:str, srate):
+def res_comp(sign, newpath:str, srate, index):
     freq = np.geomspace(config["f0"], config["f1"], len(sign)) #config["srate"] * config["chirp_time"])
 
-    s_env, s_res = signal.envelope(sign)
-    """f, t, Zxx = signal.stft(sign, srate)
-    plt.pcolormesh(t, f, np.abs(Zxx), shading='gouraud')
-    plt.show()
-    """
-    s_env = s_env / max(s_env)
-
-    fft_data = fftpack.rfft(sign)
-    phase_data = np.angle(fft_data)
-    plt.plot(freq, phase_data)
-    plt.show()
+    hilbert = signal.hilbert(sign)
+    envelope = np.absolute(hilbert)
+    phase_data = np.unwrap(np.angle(hilbert))
 
     for _ in range(2):
-        s_env = signal.savgol_filter(s_env, 75, 2)
+        envelope = signal.savgol_filter(envelope, 600, 1)
 
-    return freq, s_env
+    for calib_csv in calib_csvs[index]:
+        spl = interpolate.interp1d(calib_csv.freq, calib_csv.res, fill_value = "extrapolate") # type: ignore
+        calib = spl(freq)
+    
+        envelope /= calib
 
-def plt_sav_results(freq, res, newpath):
-    pd.DataFrame({"freq":freq, "res": res}).to_csv(newpath + r"\Res_data.csv", sep = ";")
+    return [freq[4000:], envelope[4000:]]
 
+def plt_sav_results(data, newpath, index=2):
     with plt.style.context("science"):
-        fig, axs = plt.subplots()
+        fig, axs = plt.subplots(figsize = (6,4))
 
-        axs.plot(freq, res)
+        if index == 2:
+            for i in data:
+                axs.semilogx(i[0], i[1])
+        else:
+            axs.semilogx(data[0], data[1])
+            peaks, props = signal.find_peaks(data[1], prominence = 0.2)
+            width, width_heights, left_ips, right_ips = signal.peak_widths(data[1], peaks, rel_height = 0.5)
+            freqs = data[0, peaks]
+            ress = data[1, peaks]
+            left_pos = data[0, left_ips.astype(int)]
+            right_pos = data[0, right_ips.astype(int)]
+            axs.scatter(freqs, ress, marker = "x", color = "C2")
+            for i in range(len(peaks)):
+                axs.hlines(y = width_heights[i], xmin = left_pos[i], xmax = right_pos[i], color = "C2")
 
         axs.set_title("Frequency Response")
         axs.set_xlabel("Frequencies [Hz]")
         axs.set_ylabel("Arb. Units")
+        axs.grid()
 
         fig.tight_layout()
         
         if test_phase == False:
-            fig.savefig(fname = newpath + r"\Freq_Res_plot.pdf", format = "pdf")
-        #plt.show()
+            match index:
+                case 0:
+                    pd.DataFrame({"freq":data[0], "res": data[1]}).to_csv(newpath + r"\Res_data_mes.csv", sep = ";")
+                    fig.savefig(fname = newpath + r"\Freq_Res_mes_plot.pdf", format = "pdf")
+                case 1:
+                    pd.DataFrame({"freq":data[0], "res": data[1]}).to_csv(newpath + r"\Res_data_ref.csv", sep = ";")
+                    fig.savefig(fname = newpath + r"\Freq_Res_ref_plot.pdf", format = "pdf")
+                case 2:
+                    fig.savefig(fname = newpath + r"\Freq_Res_plot.pdf", format = "pdf")
+        plt.show()
         plt.close("all")
 
 def main(num):
     path = r"C:\Programmieren\Praktikum\GPII\Data\Res"
     newpath = path + rf"\Messung_{num}"
 
-    srate, sign = read(newpath + r"\Mes.wav")
+    names = ["Mes", "Ref"]
 
-    sign = signal_slicing(sign, srate)
+    database = []
 
-    for i in calib_csvs:
-        sign = equalize(sign, i)
+    for index in tqdm(range(2)):
+        srate, sign = read(newpath + rf"\{names[index]}.wav")
+        sign = signal_slicing(sign, srate, index) / 2**32
+        
+        data = res_comp(sign, newpath, srate, index)
+        
+        database.append(data)
 
-    freq, res = res_comp(sign, newpath, srate)
-
-    plt_sav_results(freq, res, newpath)
-
+        plt_sav_results(np.array(list(data)), newpath, index)
+    database = np.array(database)
+    #print((database[0,1]**2).mean(), (database[1,1]**2).mean())
+    plt_sav_results(database, newpath)
 
 if __name__ == "__main__":
     path = r"C:\Programmieren\Praktikum\GPII\Data\Res"
@@ -155,4 +166,4 @@ if __name__ == "__main__":
     for i in tqdm(range(22, 31), colour= "#20C20E"):
         main(i)
     
-    #main(5)
+    #main(22)

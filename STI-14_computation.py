@@ -122,8 +122,7 @@ def equalize(sign, calib_csv):
     fft_sign = np.fft.rfft(sign)
     fq = np.fft.rfftfreq(len(sign), d = 1/config["srate"])
     spl = interpolate.interp1d(calib_csv.x, calib_csv.y, fill_value = "extrapolate") # type: ignore
-    x = np.linspace(0, max(fq), len(fft_sign))
-    calib = spl(x)
+    calib = spl(fq)
 
     fft_sign /= calib
 
