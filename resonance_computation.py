@@ -21,7 +21,7 @@ with open('resonance_config.json', 'r') as file:
     config = json.load(file)
 
 calibration_overwrite = True
-test_phase = True
+test_phase = 1
 
 calib_csvs = [[pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Res_data_mes.csv", sep = ";")],[pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Res_data_ref.csv", sep = ";")]]
 
@@ -87,7 +87,7 @@ def res_comp(sign, newpath:str, srate, index):
 
     hilbert = signal.hilbert(sign)
     envelope = np.absolute(hilbert)
-    phase_data = np.unwrap(np.angle(hilbert))
+    phase_data = np.unwrap(np.angle(hilbert)) #type:ignore
 
     for _ in range(2):
         envelope = signal.savgol_filter(envelope, 600, 1)
@@ -100,24 +100,27 @@ def res_comp(sign, newpath:str, srate, index):
 
     return [freq[4000:], envelope[4000:]]
 
-def plt_sav_results(data, newpath, index=2):
+def fwhm(data):
+    peaks, props = signal.find_peaks(data[1], prominence = 0.2)
+    width, width_heights, left_ips, right_ips = signal.peak_widths(data[1], peaks, rel_height = 0.5)
+    freqs = data[0, peaks]
+    ress = data[1, peaks]
+    left_pos = data[0, left_ips.astype(int)]
+    right_pos = data[0, right_ips.astype(int)]
+    return np.array([freqs, ress]), np.array([width_heights, left_pos, right_pos])
+
+def plt_sav_results(data, newpath, index=2, dat = np.empty(1), peaks = np.empty(1)):
     with plt.style.context("science"):
-        fig, axs = plt.subplots(figsize = (6,4))
+        fig, axs = plt.subplots(figsize = (12,8))
 
         if index == 2:
             for i in data:
                 axs.semilogx(i[0], i[1])
         else:
             axs.semilogx(data[0], data[1])
-            peaks, props = signal.find_peaks(data[1], prominence = 0.2)
-            width, width_heights, left_ips, right_ips = signal.peak_widths(data[1], peaks, rel_height = 0.5)
-            freqs = data[0, peaks]
-            ress = data[1, peaks]
-            left_pos = data[0, left_ips.astype(int)]
-            right_pos = data[0, right_ips.astype(int)]
-            axs.scatter(freqs, ress, marker = "x", color = "C2")
-            for i in range(len(peaks)):
-                axs.hlines(y = width_heights[i], xmin = left_pos[i], xmax = right_pos[i], color = "C2")
+            #axs.scatter(dat[0], dat[1], marker = "x", color = "C2")
+            #for i in range(len(peaks)):
+            #    axs.hlines(y = peaks[0,i], xmin = peaks[1,i], xmax = peaks[2,i], color = "C2")
 
         axs.set_title("Frequency Response")
         axs.set_xlabel("Frequencies [Hz]")
@@ -139,31 +142,57 @@ def plt_sav_results(data, newpath, index=2):
         plt.show()
         plt.close("all")
 
-def main(num):
+def main(num, index_counter):
     path = r"C:\Programmieren\Praktikum\GPII\Data\Res"
     newpath = path + rf"\Messung_{num}"
 
     names = ["Mes", "Ref"]
 
+    with open(newpath + r"\Config.json") as fl:
+        config_local = json.load(fl)
+
+    db_li = []
     database = []
 
-    for index in tqdm(range(2)):
+    for index in range(2):
         srate, sign = read(newpath + rf"\{names[index]}.wav")
         sign = signal_slicing(sign, srate, index) / 2**32
         
-        data = res_comp(sign, newpath, srate, index)
+        data = np.array(list(res_comp(sign, newpath, srate, index)))
         
         database.append(data)
+        dat, peaks = fwhm(data)
 
-        plt_sav_results(np.array(list(data)), newpath, index)
+        for i in range(len(dat[0])):
+            row = config_local.copy()
+            row["signal"] = names[index]
+            row["peak_pos"] = dat[0,i]
+            row["peak_height"] = dat[1,i]
+            row["peak_fwhm_height"] = peaks[0,i]
+            row["peak_fwhm_left_pos"] = peaks[1,i]
+            row["peak_fwhm_right_pos"] = peaks[2,i]
+            row["peak_fwhm_width"] = peaks[2,i] - peaks[1,i]
+            db_li.append(pd.DataFrame(row, pd.Index([index_counter])))
+            index_counter += 1
+
+        plt_sav_results(data, newpath, index, dat, peaks)
     database = np.array(database)
     #print((database[0,1]**2).mean(), (database[1,1]**2).mean())
     plt_sav_results(database, newpath)
+    return db_li, index_counter
 
 if __name__ == "__main__":
     path = r"C:\Programmieren\Praktikum\GPII\Data\Res"
-    
+
+    main(32,0)
+
+    js_files = []
+    index_counter = 0
     for i in tqdm(range(22, 31), colour= "#20C20E"):
-        main(i)
+        db, index_counter = main(i, index_counter)
+        js_files.extend(db)
     
     #main(22)
+
+    df = pd.concat(js_files)
+    #df.to_csv(path + r"\Res_Datensatz.csv")

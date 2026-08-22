@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.colors as mcolors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -134,10 +135,52 @@ with plt.style.context("science"):
     #plt.show()
     #exit()
 
-# Dependence on the Distance
+for i in [2,3,4]:
+    a_expc = df.loc[(df.Approx_dist == i) & (df.Material == "Kupfer")]
+    b_expc = df.loc[(df.Approx_dist == i) & (df.Material == "Nylon")]
 
-table = stats.ttest_ind()
-print(table)
+    N = 10000
+
+    p_li = np.empty(N, dtype = float)
+    
+    for j in tqdm(range(N), colour= "#20C20E"):
+        a = np.random.normal(a_expc.STI_wo_ref, scale = a_expc.u_STI_wo_ref)
+        b = np.random.normal(b_expc.STI_wo_ref, scale = b_expc.u_STI_wo_ref)
+        p_li[j] = stats.ttest_ind(a, b, equal_var = False)[1]
+    fig, axs = plt.subplots()
+    axs.hist(p_li, bins = "auto")
+    axs.set_title(f"Abstand {i}")
+    # Source - https://stackoverflow.com/a/61263222
+    # Posted by poisonedivy
+    # Retrieved 2026-08-23, License - CC BY-SA 4.0
+
+    vals,counts = np.unique(p_li, return_counts=True)
+    index = np.argmax(counts)
+
+    print(f"Approx. Abstand {i} m test results:{vals[index]}%") #{np.mean(p_li)}+-{np.std(p_li)}
+
+for i in [[0.2, 0.35], [0.4, 0.5], [0.8, 0.99]]:
+    a_expc = df.loc[(df.Durchmesser == i[0]) & (df.Material == "Kupfer")]
+    b_expc = df.loc[(df.Durchmesser == i[1]) & (df.Material == "Nylon")]
+
+    N = 10000
+
+    p_li = np.empty(N, dtype = float)
+    
+    for j in tqdm(range(N), colour = "#20C20E"):
+        a = np.random.normal(a_expc.STI_wo_ref, scale = a_expc.u_STI_wo_ref)
+        b = np.random.normal(b_expc.STI_wo_ref, scale = b_expc.u_STI_wo_ref)
+        p_li[j] = stats.ttest_ind(a, b, equal_var = False)[1]
+    fig, axs = plt.subplots()
+    axs.hist(p_li, bins = "auto")
+    axs.set_title(f"Durchmesser {i[0]}{i[1]}")
+    # Source - https://stackoverflow.com/a/61263222
+    # Posted by poisonedivy
+    # Retrieved 2026-08-23, License - CC BY-SA 4.0
+
+    vals,counts = np.unique(p_li, return_counts=True)
+    index = np.argmax(counts)
+    print(f"Durchmesser {i[0]} mm and {i[1]} mm test results:{vals[index]}%")#{np.mean(p_li)}+-{np.std(p_li)}
 
 with plt.style.context("science"):
     fig, axs = plt.subplots(figsize = (6,4))
