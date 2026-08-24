@@ -21,7 +21,7 @@ with open('resonance_config.json', 'r') as file:
     config = json.load(file)
 
 calibration_overwrite = True
-test_phase = 1
+test_phase = True
 
 calib_csvs = [[pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Res_data_mes.csv", sep = ";")],[pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Res_data_ref.csv", sep = ";")]]
 
@@ -96,7 +96,7 @@ def res_comp(sign, newpath:str, srate, index):
         spl = interpolate.interp1d(calib_csv.freq, calib_csv.res, fill_value = "extrapolate") # type: ignore
         calib = spl(freq)
     
-        envelope /= calib
+        envelope /= (calib)
 
     return [freq[4000:], envelope[4000:]]
 
@@ -111,16 +111,16 @@ def fwhm(data):
 
 def plt_sav_results(data, newpath, index=2, dat = np.empty(1), peaks = np.empty(1)):
     with plt.style.context("science"):
-        fig, axs = plt.subplots(figsize = (12,8))
+        fig, axs = plt.subplots(figsize = (6,4))
 
         if index == 2:
             for i in data:
                 axs.semilogx(i[0], i[1])
         else:
             axs.semilogx(data[0], data[1])
-            #axs.scatter(dat[0], dat[1], marker = "x", color = "C2")
-            #for i in range(len(peaks)):
-            #    axs.hlines(y = peaks[0,i], xmin = peaks[1,i], xmax = peaks[2,i], color = "C2")
+            axs.scatter(dat[0], dat[1], marker = "x", color = "C2")
+            for i in range(len(peaks)):
+                axs.hlines(y = peaks[0,i], xmin = peaks[1,i], xmax = peaks[2,i], color = "C2")
 
         axs.set_title("Frequency Response")
         axs.set_xlabel("Frequencies [Hz]")
@@ -177,14 +177,14 @@ def main(num, index_counter):
 
         plt_sav_results(data, newpath, index, dat, peaks)
     database = np.array(database)
-    #print((database[0,1]**2).mean(), (database[1,1]**2).mean())
+    print((database[0,1]**2).mean(), (database[1,1]**2).mean())
     plt_sav_results(database, newpath)
     return db_li, index_counter
 
 if __name__ == "__main__":
     path = r"C:\Programmieren\Praktikum\GPII\Data\Res"
 
-    main(32,0)
+    #main(32,0)
 
     js_files = []
     index_counter = 0

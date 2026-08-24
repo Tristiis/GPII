@@ -10,8 +10,11 @@ from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.colors as mcolors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy import stats
+from statannotations.Annotator import Annotator
 
 test_mode = True
+
+N = 1000
 
 plt.style.use("science")
 
@@ -122,9 +125,16 @@ def colour_background(fig, axs):
 # Dependence on the radius
 with plt.style.context("science"):
     fig = plt.figure(figsize = (6,4))
-    axs = sns.boxplot(data = df, x = "Durchmesser", y = "STI_wo_ref", hue = "Material") #, width = 0.4)
+    axs = sns.violinplot(data = df, x = "Durchmesser", y = "STI_wo_ref", hue = "Material", inner = "stick") #, width = 0.4)
     #axs = sns.violinplot(data = df, x = "Durchmesser", y = "STI_wo_ref", alpha = 0.5, fill = False, inner = None, legend = False)
-    sns.stripplot(data = df, x = "Durchmesser", y = "STI_wo_ref", legend = False, color = "orange", jitter=True, size=5)
+    sns.scatterplot(data = df, x = "Durchmesser", y = "STI_wo_ref", yerr = "u_STI_wo_ref", legend = False, color = "orange", jitter=True, size=5)
+
+    pairs=[(0.2, 0.35), (0.4, 0.35), (0.4, 0.5), (0.8, 0.99)]
+
+    annotator = Annotator(axs, pairs, data=df, x="Durchmesser", y="STI_wo_ref")
+    annotator.configure(test='t-test_ind', text_format='star', loc='inside')
+    annotator.apply_and_annotate()
+
     colour_background(fig, axs)
     axs.yaxis.tick_right()
     axs.set_ylabel('STI []', rotation = 270)
@@ -139,8 +149,6 @@ for i in [2,3,4]:
     a_expc = df.loc[(df.Approx_dist == i) & (df.Material == "Kupfer")]
     b_expc = df.loc[(df.Approx_dist == i) & (df.Material == "Nylon")]
 
-    N = 10000
-
     p_li = np.empty(N, dtype = float)
     
     for j in tqdm(range(N), colour= "#20C20E"):
@@ -148,22 +156,12 @@ for i in [2,3,4]:
         b = np.random.normal(b_expc.STI_wo_ref, scale = b_expc.u_STI_wo_ref)
         p_li[j] = stats.ttest_ind(a, b, equal_var = False)[1]
     fig, axs = plt.subplots()
-    axs.hist(p_li, bins = "auto")
+    axs = sns.kdeplot(data = p_li)#axs.hist(p_li, bins = "auto")
     axs.set_title(f"Abstand {i}")
-    # Source - https://stackoverflow.com/a/61263222
-    # Posted by poisonedivy
-    # Retrieved 2026-08-23, License - CC BY-SA 4.0
 
-    vals,counts = np.unique(p_li, return_counts=True)
-    index = np.argmax(counts)
-
-    print(f"Approx. Abstand {i} m test results:{vals[index]}%") #{np.mean(p_li)}+-{np.std(p_li)}
-
-for i in [[0.2, 0.35], [0.4, 0.5], [0.8, 0.99]]:
+for i in [[0.2, 0.35], [0.4, 0.35], [0.4, 0.5], [0.8, 0.99]]:
     a_expc = df.loc[(df.Durchmesser == i[0]) & (df.Material == "Kupfer")]
     b_expc = df.loc[(df.Durchmesser == i[1]) & (df.Material == "Nylon")]
-
-    N = 10000
 
     p_li = np.empty(N, dtype = float)
     
@@ -172,15 +170,8 @@ for i in [[0.2, 0.35], [0.4, 0.5], [0.8, 0.99]]:
         b = np.random.normal(b_expc.STI_wo_ref, scale = b_expc.u_STI_wo_ref)
         p_li[j] = stats.ttest_ind(a, b, equal_var = False)[1]
     fig, axs = plt.subplots()
-    axs.hist(p_li, bins = "auto")
+    axs = sns.kdeplot(data = p_li)
     axs.set_title(f"Durchmesser {i[0]}{i[1]}")
-    # Source - https://stackoverflow.com/a/61263222
-    # Posted by poisonedivy
-    # Retrieved 2026-08-23, License - CC BY-SA 4.0
-
-    vals,counts = np.unique(p_li, return_counts=True)
-    index = np.argmax(counts)
-    print(f"Durchmesser {i[0]} mm and {i[1]} mm test results:{vals[index]}%")#{np.mean(p_li)}+-{np.std(p_li)}
 
 with plt.style.context("science"):
     fig, axs = plt.subplots(figsize = (6,4))
@@ -213,7 +204,7 @@ with plt.style.context("science"):
     #plt.show()
 
 with plt.style.context("science"):
-    joint = sns.jointplot(kind = "kde", data = df, x = "Frequenz", y = "STI_wo_ref", hue = "Material")
+    joint = sns.jointplot(kind = "kde", data = df, x = "Frequenz", y = "STI_wo_ref", hue = "Material", legend = True)
     axs = joint.ax_joint
     fig = joint.figure
     sns.despine(ax = axs, top = False, right = False)
@@ -223,7 +214,6 @@ with plt.style.context("science"):
     axs.yaxis.tick_right()
     axs.set_ylabel('STI []', rotation = 270)
     axs.yaxis.set_label_position("right")
-    axs.legend(title = "Approx. Abstand")
     axs.grid()
     fig.tight_layout()
     if test_mode == False:
