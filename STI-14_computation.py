@@ -121,7 +121,7 @@ def signal_slicing(sign:np.ndarray, calibration_intervention: bool, peak_index =
 def equalize(sign, calib_csv):
     fft_sign = np.fft.rfft(sign)
     fq = np.fft.rfftfreq(len(sign), d = 1/config["srate"])
-    spl = interpolate.interp1d(calib_csv.x, calib_csv.y, fill_value = "extrapolate") # type: ignore
+    spl = interpolate.interp1d(calib_csv.freq, calib_csv.res, fill_value = "extrapolate") # type: ignore
     calib = spl(fq)
 
     fft_sign /= calib
@@ -309,18 +309,18 @@ def monte_carlo_wo_ref(expected_m, newpath, sti):
 
     u_sti = np.std(sti_li)
     u_ti = np.std(ti_li)
-
+    """
     print(f"STI: {np.mean(sti_li)}")
     print(f"Unc.Sti: {u_sti}")
     print(f"Diff. expc./MC: {sti-np.mean(sti_li)}")
-
+    """
     with plt.style.context("science"):
-        fig, axs = plt.subplots()
+        fig, axs = plt.subplots(figsize = (6,4))
 
         axs.hist(sti_li, bins = "auto")
         axs.set_title("Monte Carlo uncertainty distribution")
-        axs.set_xlabel("Counts []")
-        axs.set_ylabel("STI []")
+        axs.set_ylabel("Counts []")
+        axs.set_xlabel("STI []")
         axs.grid()
         fig.savefig(fname = newpath + r"\Unc_hist_wo_ref.pdf", format = "pdf")
         plt.close("all")
@@ -333,7 +333,7 @@ def plt_sav_results(sti, ti, newpath):
     k = [f"{i/1000}k" if i >= 1000 else i for i in k]
 
     with plt.style.context("science"):
-        fig_ti, axs_ti = plt.subplots()
+        fig_ti, axs_ti = plt.subplots(figsize = (6,4))
 
         im = axs_ti.imshow(ti, vmin=0, vmax=1)
 
@@ -355,9 +355,12 @@ def plt_sav_results(sti, ti, newpath):
         #print(f"STI Value: {sti}")
         #plt.show()
 
-def main(num):
+def main(num, stuck = False, index = 0):
     global calibration_overwrite
-    newpath = path + rf"\Messung_{num}"
+    if stuck == True:
+        newpath = path + rf"\Messung_{num}_{index}"
+    else:
+        newpath = path + rf"\Messung_{num}"
 
     calibration_intervention = True
 
@@ -372,10 +375,10 @@ def main(num):
     signs = []
     if ref_signal == True:
         for i in [r"\Mes.wav", r"\Ref.wav"]: # , r"\Ref.wav"
-            srate, data = read(path + rf"\Messung_{num}" + i)
+            srate, data = read(newpath + i)
             signs.append(data)
     else:
-        srate, data = read(path + rf"\Messung_{num}" + r"\Mes.wav")
+        srate, data = read(newpath + r"\Mes.wav")
         signs.append(data)
     
     sliced_signs = []
@@ -425,6 +428,9 @@ def main(num):
 
 if __name__ == "__main__":
     path = r"C:\Programmieren\Praktikum\GPII\Data\STI"
-    while True:
-        for i in tqdm(range(len(os.listdir(path))-2), colour= "#20C20E"):
-            main(i+1)
+    
+    #for i in tqdm(range(len(os.listdir(path))-2), colour= "#20C20E"):
+    #    main(i+1)
+
+    for i in range(3):
+        main(26, stuck = True, index = i)

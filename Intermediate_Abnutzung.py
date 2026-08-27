@@ -9,8 +9,8 @@ def main():
     path = r"C:\Programmieren\Praktikum\GPII\Data\STI"
 
     js_files = []
-    for i in tqdm(range(len(os.listdir(path))-4), colour= "#20C20E"):
-        newpath = path + rf"\Messung_{i}"
+    for i in tqdm(range(3), colour= "#20C20E"):
+        newpath = path + rf"\Messung_26_{i}"
         with open(newpath + r"\Config.json") as fl:
             data = json.load(fl)
         js_files.append(pd.DataFrame(data, index = pd.Index([i])))
@@ -46,7 +46,7 @@ def main():
     df["u_Bodendicke"] = df["u_Bodendicke"].fillna(0.002405)
     df["[Bodendicke]"] = df["[Bodendicke]"].fillna("mm")
 
-    df.to_csv(path + r"\STI_Datensatz.csv", sep = ";")
+    df.to_csv(path + r"\STI_Abnutzung_Datensatz.csv", sep = ";")
 
 if __name__ == "__main__":
     main()

@@ -21,7 +21,7 @@ with open('resonance_config.json', 'r') as file:
     config = json.load(file)
 
 calibration_overwrite = True
-test_phase = True
+test_phase = False
 
 calib_csvs = [[pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Res_data_mes.csv", sep = ";")],[pd.read_csv(r"C:\Programmieren\Praktikum\GPII\Calibration_files\Res_data_ref.csv", sep = ";")]]
 
@@ -111,7 +111,7 @@ def fwhm(data):
 
 def plt_sav_results(data, newpath, index=2, dat = np.empty(1), peaks = np.empty(1)):
     with plt.style.context("science"):
-        fig, axs = plt.subplots(figsize = (6,4))
+        fig, axs = plt.subplots(figsize = (3,2))
 
         if index == 2:
             for i in data:
@@ -124,7 +124,7 @@ def plt_sav_results(data, newpath, index=2, dat = np.empty(1), peaks = np.empty(
 
         axs.set_title("Frequency Response")
         axs.set_xlabel("Frequencies [Hz]")
-        axs.set_ylabel("Arb. Units")
+        axs.set_ylabel("Amplitude [AE]")
         axs.grid()
 
         fig.tight_layout()
@@ -134,12 +134,15 @@ def plt_sav_results(data, newpath, index=2, dat = np.empty(1), peaks = np.empty(
                 case 0:
                     pd.DataFrame({"freq":data[0], "res": data[1]}).to_csv(newpath + r"\Res_data_mes.csv", sep = ";")
                     fig.savefig(fname = newpath + r"\Freq_Res_mes_plot.pdf", format = "pdf")
+                    fig.savefig(fname = newpath + r"\Freq_Res_mes_plot.png", format = "png")
                 case 1:
                     pd.DataFrame({"freq":data[0], "res": data[1]}).to_csv(newpath + r"\Res_data_ref.csv", sep = ";")
                     fig.savefig(fname = newpath + r"\Freq_Res_ref_plot.pdf", format = "pdf")
+                    fig.savefig(fname = newpath + r"\Freq_Res_ref_plot.png", format = "png")
                 case 2:
                     fig.savefig(fname = newpath + r"\Freq_Res_plot.pdf", format = "pdf")
-        plt.show()
+                    fig.savefig(fname = newpath + r"\Freq_Res_plot.png", format = "png")
+        #plt.show()
         plt.close("all")
 
 def main(num, index_counter):
@@ -151,7 +154,7 @@ def main(num, index_counter):
     with open(newpath + r"\Config.json") as fl:
         config_local = json.load(fl)
 
-    db_li = []
+    db_peak = []
     database = []
 
     for index in range(2):
@@ -162,7 +165,7 @@ def main(num, index_counter):
         
         database.append(data)
         dat, peaks = fwhm(data)
-
+        
         for i in range(len(dat[0])):
             row = config_local.copy()
             row["signal"] = names[index]
@@ -172,27 +175,37 @@ def main(num, index_counter):
             row["peak_fwhm_left_pos"] = peaks[1,i]
             row["peak_fwhm_right_pos"] = peaks[2,i]
             row["peak_fwhm_width"] = peaks[2,i] - peaks[1,i]
-            db_li.append(pd.DataFrame(row, pd.Index([index_counter])))
+            db_peak.append(pd.DataFrame(row, pd.Index([index_counter])))
             index_counter += 1
 
         plt_sav_results(data, newpath, index, dat, peaks)
     database = np.array(database)
-    print((database[0,1]**2).mean(), (database[1,1]**2).mean())
+
+    transmission = (database[0,1]**2).mean()
+    reflexion = (database[1,1]**2).mean()
+
+    ds = config_local.copy()
+    ds["trans"] = transmission
+    ds["refl"] = reflexion
+    ds = pd.DataFrame(ds, pd.Index([num]))
+
     plt_sav_results(database, newpath)
-    return db_li, index_counter
+    return db_peak, [ds,], index_counter
 
 if __name__ == "__main__":
     path = r"C:\Programmieren\Praktikum\GPII\Data\Res"
 
     #main(32,0)
 
-    js_files = []
+    js_peak_files = []
+    js_trans_files = []
     index_counter = 0
     for i in tqdm(range(22, 31), colour= "#20C20E"):
-        db, index_counter = main(i, index_counter)
-        js_files.extend(db)
+        db_peak, ds, index_counter = main(i, index_counter)
+        js_peak_files.extend(db_peak)
+        js_trans_files.extend(ds)
     
     #main(22)
 
-    df = pd.concat(js_files)
-    #df.to_csv(path + r"\Res_Datensatz.csv")
+    pd.concat(js_peak_files).to_csv(path + r"\Res_Peaks_Abn_Datensatz.csv")
+    pd.concat(js_trans_files).to_csv(path + r"\Res_Trans_Abn_Datensatz.csv")
