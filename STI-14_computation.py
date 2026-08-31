@@ -1,8 +1,13 @@
+# Implemented after the Paper: Pavel Rajmic Jiří Schimmel / Cieslar, Šimon
+# A MATLAB toolbox for computation of Speech Transmission Index (STI)
+# 2025
+
 import os
 import json
 import scienceplots
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import matplotlib.pyplot as plt
 import acoustics.generator as generator
 from tqdm import tqdm
@@ -10,6 +15,7 @@ from os import makedirs
 from scipy import signal
 from scipy import interpolate
 from scipy.signal import find_peaks
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.io.wavfile import read
 
 # ---------- Variables prescribed by the standard ----------
@@ -287,14 +293,20 @@ def monte_carlo(sliced_signs, newpath, sti):
     print(f"STI: {np.mean(sti_li)}")
     print(f"Unc.Sti: {u_sti}")
     print(f"Diff. expc./MC: {sti-np.mean(sti_li)}")
-
+    colours = ["#c235a1", "#7f3da9", "#4fd2d2"]
     with plt.style.context("science"):
-        fig, axs = plt.subplots()
-
-        axs.hist(sti_li)
-        fig.savefig(fname = newpath + r"\Unc_hist.pdf", format = "pdf")
+        fig_hist, axs_hist = plt.subplots(figsize = (6,4))
+        sns.kdeplot(data = sti_li, ax = axs_hist, color = colours[0])#axs.hist(p_li, bins = "auto")
+        axs_hist.axvline(np.mean(sti_li), label = "Med(p)", c = colours[1])
+        axs_hist.axvspan(np.mean(sti_li) - np.std(sti_li), np.mean(sti_li) + np.std(sti_li), label = "STD", color = colours[2], alpha = 0.3)
+        axs_hist.set_title(f"MC Verteilung")
+        axs_hist.legend()
+        axs_hist.grid()
+        axs_hist.set_xlabel("STI [1]")
+        fig_hist.tight_layout()
+        fig_hist.savefig(fname = newpath + rf"\Unc_hist.pdf", format = "pdf", dpi = 300)
+        fig_hist.savefig(fname = newpath + rf"\Unc_hist.png", format = "png", dpi = 300)
         plt.close("all")
-        #plt.show()
 
     return u_sti, u_ti
 
@@ -314,18 +326,20 @@ def monte_carlo_wo_ref(expected_m, newpath, sti):
     print(f"Unc.Sti: {u_sti}")
     print(f"Diff. expc./MC: {sti-np.mean(sti_li)}")
     """
+    colours = ["#c235a1", "#7f3da9", "#4fd2d2"]
     with plt.style.context("science"):
-        fig, axs = plt.subplots(figsize = (6,4))
-
-        axs.hist(sti_li, bins = "auto")
-        axs.set_title("Monte Carlo uncertainty distribution")
-        axs.set_ylabel("Counts []")
-        axs.set_xlabel("STI []")
-        axs.grid()
-        fig.savefig(fname = newpath + r"\Unc_hist_wo_ref.pdf", format = "pdf")
+        fig_hist, axs_hist = plt.subplots(figsize = (6,4))
+        sns.kdeplot(data = sti_li, ax = axs_hist, color = colours[0])#axs.hist(p_li, bins = "auto")
+        axs_hist.axvline(np.mean(sti_li), label = "Med(p)", c = colours[1])
+        axs_hist.axvspan(np.mean(sti_li) - np.std(sti_li), np.mean(sti_li) + np.std(sti_li), label = "STD", color = colours[2], alpha = 0.3)
+        axs_hist.set_title(f"MC Verteilung")
+        axs_hist.legend()
+        axs_hist.grid()
+        axs_hist.set_xlabel("STI [1]")
+        fig_hist.tight_layout()
+        fig_hist.savefig(fname = newpath + rf"\Unc_hist_wo_ref.pdf", format = "pdf", dpi = 300)
+        fig_hist.savefig(fname = newpath + rf"\Unc_hist_wo_ref.png", format = "png", dpi = 300)
         plt.close("all")
-        #plt.show()
-
     return u_sti, u_ti
 
 def plt_sav_results(sti, ti, newpath):
@@ -344,7 +358,17 @@ def plt_sav_results(sti, ti, newpath):
         axs_ti.set_ylabel("Center frequency [Hz]")
         axs_ti.grid()
 
-        fig_ti.colorbar(im, ax=axs_ti, orientation='horizontal', fraction=.1)
+        # Source - https://stackoverflow.com/a/18195921
+        # Posted by bogatron, modified by community. See post 'Timeline' for change history
+        # Retrieved 2026-08-28, License - CC BY-SA 4.0
+            
+        # create an axes on the right side of ax. The width of cax will be 5%
+        # of ax and the padding between cax and ax will be fixed at 0.05 inch.
+        divider = make_axes_locatable(axs_ti)
+        cax = divider.append_axes("right", size="5%", pad=0.05)
+        
+        fig_ti.colorbar(im, cax=cax)
+        
         fig_ti.tight_layout()
         
         if test_phase == False: #  and not os.path.exists(newpath + r"\TI_plot.pdf")
@@ -429,8 +453,8 @@ def main(num, stuck = False, index = 0):
 if __name__ == "__main__":
     path = r"C:\Programmieren\Praktikum\GPII\Data\STI"
     
-    #for i in tqdm(range(len(os.listdir(path))-2), colour= "#20C20E"):
-    #    main(i+1)
+    for i in tqdm(range(len(os.listdir(path))-2), colour= "#20C20E"):
+        main(i+1)
 
     for i in range(3):
         main(26, stuck = True, index = i)

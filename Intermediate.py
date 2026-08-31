@@ -9,7 +9,7 @@ def main():
     path = r"C:\Programmieren\Praktikum\GPII\Data\STI"
 
     js_files = []
-    for i in tqdm(range(len(os.listdir(path))-4), colour= "#20C20E"):
+    for i in tqdm(range(len(os.listdir(path))-7), colour= "#20C20E"):
         newpath = path + rf"\Messung_{i}"
         with open(newpath + r"\Config.json") as fl:
             data = json.load(fl)
@@ -41,7 +41,7 @@ def main():
     df["rel_u_STI_wo_ref"] = df["u_STI_wo_ref"] / df["STI_wo_ref"]
     df["Approx_dist"] = [round(i) for i in df["Abstand"]]
 
-    df["Material_Boden"] = df["Material_Boden"].fillna("Laborbuch_Papier")
+    df["Material_Boden"] = df["Material_Boden"].fillna(r"Papier $90 \\frac{g}{m^2}")
     df["Bodendicke"] = df["Bodendicke"].fillna(0.1)
     df["u_Bodendicke"] = df["u_Bodendicke"].fillna(0.002405)
     df["[Bodendicke]"] = df["[Bodendicke]"].fillna("mm")

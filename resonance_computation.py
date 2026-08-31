@@ -111,7 +111,7 @@ def fwhm(data):
 
 def plt_sav_results(data, newpath, index=2, dat = np.empty(1), peaks = np.empty(1)):
     with plt.style.context("science"):
-        fig, axs = plt.subplots(figsize = (3,2))
+        fig, axs = plt.subplots(figsize = (6,4))
 
         if index == 2:
             for i in data:
@@ -133,15 +133,15 @@ def plt_sav_results(data, newpath, index=2, dat = np.empty(1), peaks = np.empty(
             match index:
                 case 0:
                     pd.DataFrame({"freq":data[0], "res": data[1]}).to_csv(newpath + r"\Res_data_mes.csv", sep = ";")
-                    fig.savefig(fname = newpath + r"\Freq_Res_mes_plot.pdf", format = "pdf")
-                    fig.savefig(fname = newpath + r"\Freq_Res_mes_plot.png", format = "png")
+                    fig.savefig(fname = newpath + r"\Freq_Res_mes_plot.pdf", format = "pdf", dpi = 300)
+                    fig.savefig(fname = newpath + r"\Freq_Res_mes_plot.png", format = "png", dpi = 300)
                 case 1:
                     pd.DataFrame({"freq":data[0], "res": data[1]}).to_csv(newpath + r"\Res_data_ref.csv", sep = ";")
-                    fig.savefig(fname = newpath + r"\Freq_Res_ref_plot.pdf", format = "pdf")
-                    fig.savefig(fname = newpath + r"\Freq_Res_ref_plot.png", format = "png")
+                    fig.savefig(fname = newpath + r"\Freq_Res_ref_plot.pdf", format = "pdf", dpi = 300)
+                    fig.savefig(fname = newpath + r"\Freq_Res_ref_plot.png", format = "png", dpi = 300)
                 case 2:
-                    fig.savefig(fname = newpath + r"\Freq_Res_plot.pdf", format = "pdf")
-                    fig.savefig(fname = newpath + r"\Freq_Res_plot.png", format = "png")
+                    fig.savefig(fname = newpath + r"\Freq_Res_plot.pdf", format = "pdf", dpi = 300)
+                    fig.savefig(fname = newpath + r"\Freq_Res_plot.png", format = "png", dpi = 300)
         #plt.show()
         plt.close("all")
 
@@ -207,5 +207,5 @@ if __name__ == "__main__":
     
     #main(22)
 
-    pd.concat(js_peak_files).to_csv(path + r"\Res_Peaks_Abn_Datensatz.csv")
-    pd.concat(js_trans_files).to_csv(path + r"\Res_Trans_Abn_Datensatz.csv")
+    #pd.concat(js_peak_files).to_csv(path + r"\Res_Peaks_Abn_Datensatz.csv")
+    #pd.concat(js_trans_files).to_csv(path + r"\Res_Trans_Abn_Datensatz.csv")

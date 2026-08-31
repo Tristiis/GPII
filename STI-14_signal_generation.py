@@ -1,3 +1,7 @@
+# Implemented after the Paper: Pavel Rajmic Jiří Schimmel / Cieslar, Šimon
+# A MATLAB toolbox for computation of Speech Transmission Index (STI)
+# 2025
+
 import json
 import scienceplots
 import os.path
